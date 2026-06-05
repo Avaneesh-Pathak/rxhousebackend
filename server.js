@@ -6,11 +6,13 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors({
-    origin:[
-      'https://yourdomain.com',
-      'https://www.yourdomain.com'
-    ]
+    origin: [
+        'https://rxhouse.netlify.app/'
+    ],
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type']
 }));
+app.options('*', cors());
 app.use(express.json());
 
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/rxhouse';
