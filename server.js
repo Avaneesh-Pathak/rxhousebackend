@@ -113,15 +113,6 @@ app.get('/api/social-clicks', async (req, res) => {
   catch (err) { res.status(500).json({ error: 'Unable to fetch social clicks' }); }
 });
 
-app.delete(['/api/social-clicks/delete-all', '/api/social-clicks/clear'], async (req, res) => {
-  try {
-    await pool.query('DELETE FROM social_clicks');
-    res.json({ success: true, message: 'All social clicks cleared' });
-  } catch (err) {
-    res.status(500).json({ error: 'Unable to clear social clicks' });
-  }
-});
-
 app.post('/api/orders', async (req, res) => {
   const { id, billing, items, itemCount, subtotal, shipping, tax, total, date } = req.body;
   const orderId = id || Date.now().toString();
@@ -151,15 +142,6 @@ app.get('/api/orders', async (req, res) => {
     const orders = rows.map(r => ({ ...r, items: itemsByOrder[r.id] || [], billing: r.billing }));
     res.json(orders);
   } catch (err) { res.status(500).json({ error: 'Unable to fetch orders' }); }
-});
-
-app.delete(['/api/orders/delete-all', '/api/orders/clear'], async (req, res) => {
-  try {
-    await pool.query('DELETE FROM orders');
-    res.json({ success: true, message: 'All orders cleared' });
-  } catch (err) {
-    res.status(500).json({ error: 'Unable to clear orders' });
-  }
 });
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
