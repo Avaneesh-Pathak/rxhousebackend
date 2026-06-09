@@ -100,7 +100,7 @@ app.get('/api/products', async (req, res) => {
   catch (err) { res.status(500).json({ error: 'Unable to fetch products' }); }
 });
 
-app.post('/api/social-click', async (req, res) => {
+app.post('/api/social-clicks', async (req, res) => {
   const { platform, fullDate, page, device, browser } = req.body;
   try {
     const result = await pool.query('INSERT INTO social_clicks (platform, fullDate, date, page, device, browser) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id', [platform, fullDate || new Date().toISOString(), new Date().toLocaleString(), page || '', device || '', browser || '']);
