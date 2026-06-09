@@ -5,15 +5,25 @@ const { Pool } = require('pg');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+/* CORS FIX */
 app.use(cors({
     origin: [
-        'https://rxhouse.netlify.app/'
+        'https://rxhouse.netlify.app',
+        'http://localhost:5500',
+        'http://127.0.0.1:5500'
     ],
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type']
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true
 }));
-app.options('*', cors());
+
 app.use(express.json());
+
+app.use((req, res, next) => {
+    console.log(`${req.method} ${req.url}`);
+    console.log('Origin:', req.headers.origin);
+    next();
+});
 
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/rxhouse';
 const pool = new Pool({ connectionString: DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
