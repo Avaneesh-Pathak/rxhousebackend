@@ -169,24 +169,9 @@ res.status(500).json({ error: err.message });
 });
 
 // Delete scripts - for testing only, not exposed in production
-app.delete('/api/social-clicks', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM social_clicks');
-
-    res.json({
-      success: true,
-      message: 'All social clicks deleted'
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({
-      error: err.message
-    });
-  }
-});
-
 app.delete('/api/orders', async (req, res) => {
   try {
+
     await pool.query('DELETE FROM order_items');
     await pool.query('DELETE FROM orders');
 
@@ -194,11 +179,36 @@ app.delete('/api/orders', async (req, res) => {
       success: true,
       message: 'All orders deleted'
     });
+
   } catch (err) {
+
     console.error(err);
+
     res.status(500).json({
       error: err.message
     });
+
+  }
+});
+
+app.delete('/api/social-clicks', async (req, res) => {
+  try {
+
+    await pool.query('DELETE FROM social_clicks');
+
+    res.json({
+      success: true,
+      message: 'All social clicks deleted'
+    });
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      error: err.message
+    });
+
   }
 });
 
