@@ -144,29 +144,7 @@ app.get('/api/orders', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Unable to fetch orders' }); }
 });
 
-app.delete('/api/orders', async (req, res) => {
-try {
-await db.run('DELETE FROM orders');
-res.json({
-success: true,
-message: 'All orders deleted'
-});
-} catch (err) {
-res.status(500).json({ error: err.message });
-}
-});
 
-app.delete('/api/social-clicks', async (req, res) => {
-try {
-await db.run('DELETE FROM social_clicks');
-res.json({
-success: true,
-message: 'All social clicks deleted'
-});
-} catch (err) {
-res.status(500).json({ error: err.message });
-}
-});
 
 // Delete scripts - for testing only, not exposed in production
 app.delete('/api/orders', async (req, res) => {
