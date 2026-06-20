@@ -5,10 +5,11 @@ const { Pool } = require('pg');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-/* CORS FIX */
 app.use(cors({
     origin: [
         'https://rxhouse.netlify.app',
+        'https://pharmacies.doctor',
+        'https://www.pharmacies.doctor'
     ],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
@@ -199,13 +200,13 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 
 // to delete data open browser console and run:
-// await fetch(
+// fetch(
 //   'https://rxhousebackend.onrender.com/api/orders',
 //   { method: 'DELETE' }
-// );
+// ).then(r => r.json()).then(console.log)
 
-// await fetch(
+// fetch(
 //   'https://rxhousebackend.onrender.com/api/social-clicks',
 //   { method: 'DELETE' }
-// );
+// ).then(r => r.json()).then(console.log)
 
