@@ -31,17 +31,18 @@ const DATABASE_URL = process.env.DATABASE_URL || 'postgres://postgres:postgres@l
 const pool = new Pool({ connectionString: DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
 
 const transporter = nodemailer.createTransport({
-
-    service: "gmail",
-
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
     auth: {
-
-        user: process.env.EMAIL_USER,
-
-        pass: process.env.EMAIL_PASS
-
-    }
-
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+    },
+    logger: true,
+    debug: true,
+    connectionTimeout: 30000,
+    greetingTimeout: 30000,
+    socketTimeout: 30000
 });
 
 transporter.verify((err)=>{
