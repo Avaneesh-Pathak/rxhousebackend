@@ -1,18 +1,21 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
-
+require("dotenv").config();
+const nodemailer = require("nodemailer");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors({
     origin: [
-        'https://rxhouse.netlify.app',
-        'https://pharmacies.doctor',
-        'https://www.pharmacies.doctor'
+        "http://localhost:5500",
+        "http://127.0.0.1:5500",
+        "https://rxhouse.netlify.app",
+        "https://pharmacies.doctor",
+        "https://www.pharmacies.doctor"
     ],
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    methods: ["GET","POST","PUT","DELETE","OPTIONS"],
+    allowedHeaders: ["Content-Type","Authorization"],
     credentials: true
 }));
 
@@ -26,6 +29,37 @@ app.use((req, res, next) => {
 
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/rxhouse';
 const pool = new Pool({ connectionString: DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
+
+const transporter = nodemailer.createTransport({
+
+    service: "gmail",
+
+    auth: {
+
+        user: process.env.EMAIL_USER,
+
+        pass: process.env.EMAIL_PASS
+
+    }
+
+});
+
+transporter.verify((err)=>{
+
+    if(err){
+
+        console.log("Mail Error");
+
+        console.log(err);
+
+    }else{
+
+        console.log("Mail Ready");
+
+    }
+
+});
+
 
 async function createTables() {
   await pool.query(`
@@ -129,6 +163,124 @@ app.post('/api/orders', async (req, res) => {
       } catch (err) { await client.query('ROLLBACK'); console.error('order items error', err.message); }
       finally { client.release(); }
     }
+    const billingData = billing || {};
+
+const html = `
+<h2>New Rx House Order</h2>
+
+<h3>Customer</h3>
+
+<table border="1" cellpadding="8">
+
+<tr><td>Name</td><td>${billingData.firstName} ${billingData.lastName}</td></tr>
+
+<tr><td>Email</td><td>${billingData.email}</td></tr>
+
+<tr><td>Phone</td><td>${billingData.phone}</td></tr>
+
+<tr><td>Street</td><td>${billingData.street}</td></tr>
+
+<tr><td>City</td><td>${billingData.city}</td></tr>
+
+<tr><td>State</td><td>${billingData.state}</td></tr>
+
+<tr><td>Zip</td><td>${billingData.zip}</td></tr>
+
+<tr><td>Country</td><td>${billingData.country}</td></tr>
+
+</table>
+
+<br>
+
+<h3>Medicines</h3>
+
+<table border="1" cellpadding="8">
+
+<tr>
+
+<th>Name</th>
+
+<th>Qty</th>
+
+<th>Price</th>
+
+</tr>
+
+${items.map(i=>`
+
+<tr>
+
+<td>${i.name}</td>
+
+<td>${i.pillQty}</td>
+
+<td>$${i.linePrice}</td>
+
+</tr>
+
+`).join("")}
+
+</table>
+
+<h3>Total</h3>
+
+<p>
+
+Subtotal : $${subtotal}
+
+<br>
+
+Tax : $${tax}
+
+<br>
+
+Grand Total : $${total}
+
+</p>
+
+<p>
+
+Notes :
+
+${billingData.notes || "None"}
+
+</p>
+`;
+
+await transporter.sendMail({
+
+    from: process.env.EMAIL_USER,
+
+    to: process.env.EMAIL_TO,
+
+    subject: `New Order ${orderId}`,
+
+    html
+
+});
+
+if(billingData.email){
+
+await transporter.sendMail({
+
+    from: process.env.EMAIL_USER,
+
+    to: billingData.email,
+
+    subject:"Order Confirmation",
+
+    html:`
+    <h2>Thank You</h2>
+
+    <p>Your order has been received.</p>
+    <p>One of our representatives will contact you shortly.</p>
+
+    <p>Order ID : ${orderId}</p>
+
+    `
+});
+
+}
     res.json({ id: orderId });
   } catch (err) { res.status(500).json({ error: 'Unable to save order', detail: err.message }); }
 });
