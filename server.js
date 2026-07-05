@@ -30,19 +30,7 @@ app.use((req, res, next) => {
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/rxhouse';
 const pool = new Pool({ connectionString: DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
 
-const transporter = nodemailer.createTransport({
 
-    service: "gmail",
-
-    auth: {
-
-        user: process.env.EMAIL_USER,
-
-        pass: process.env.EMAIL_PASS
-
-    }
-
-});
 const transporter = nodemailer.createTransport({
     host: "smtp.gmail.com",
     port: 587,
