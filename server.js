@@ -32,8 +32,8 @@ const DATABASE_URL = process.env.DATABASE_URL || 'postgres://postgres:postgres@l
 const pool = new Pool({ connectionString: DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
 
 const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 443,
+    host: "smtp-relay.brevo.com",
+    port: 587,
     secure: true,
     auth: {
         user: process.env.SMTP_USER,
