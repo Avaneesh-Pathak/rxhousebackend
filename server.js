@@ -30,59 +30,32 @@ app.use((req, res, next) => {
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/rxhouse';
 const pool = new Pool({ connectionString: DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
 
-const dns = require("dns");
-
-dns.lookup("smtp.gmail.com", (err, address) => {
-    console.log("DNS TEST");
-    console.log(err || address);
-});
-const net = require("net");
-
-const socket = net.createConnection({
-    host: "smtp.gmail.com",
-    port: 587
-});
-
-socket.setTimeout(10000);
-
-socket.on("connect", () => {
-    console.log("CONNECTED TO GMAIL");
-    socket.destroy();
-});
-
-socket.on("timeout", () => {
-    console.log("TIMEOUT CONNECTING TO GMAIL");
-    socket.destroy();
-});
-
-socket.on("error", e => {
-    console.log("SOCKET ERROR");
-    console.log(e);
-});
 const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 587,
-    secure: true,
+
+    service: "gmail",
+
     auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
-    },
-    logger: true,
-    debug: true,
-    connectionTimeout: 30000,
-    greetingTimeout: 30000,
-    socketTimeout: 30000
+
+        user: process.env.EMAIL_USER,
+
+        pass: process.env.EMAIL_PASS
+
+    }
+
 });
 
-transporter.verify((err, success) => {
+transporter.verify((err)=>{
 
-    if (err) {
-        console.error("SMTP VERIFY FAILED");
-        console.error(err);
-        console.error("Code:", err.code);
-        console.error("Command:", err.command);
-    } else {
-        console.log("SMTP READY");
+    if(err){
+
+        console.log("Mail Error");
+
+        console.log(err);
+
+    }else{
+
+        console.log("Mail Ready");
+
     }
 
 });
@@ -276,7 +249,7 @@ ${billingData.notes || "None"}
 
 await transporter.sendMail({
 
-    from: process.env.SMTP_USER,
+    from: process.env.EMAIL_USER,
 
     to: process.env.EMAIL_TO,
 
@@ -290,7 +263,7 @@ if(billingData.email){
 
 await transporter.sendMail({
 
-    from: process.env.SMTP_USER,
+    from: process.env.EMAIL_USER,
 
     to: billingData.email,
 
