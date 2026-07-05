@@ -1,3 +1,4 @@
+
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -31,17 +32,18 @@ const DATABASE_URL = process.env.DATABASE_URL || 'postgres://postgres:postgres@l
 const pool = new Pool({ connectionString: DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
 
 const transporter = nodemailer.createTransport({
-
-    service: "gmail",
-
+    host: "smtp.gmail.com",
+    port: 443,
+    secure: true,
     auth: {
-
-        user: process.env.EMAIL_USER,
-
-        pass: process.env.EMAIL_PASS
-
-    }
-
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+    },
+    logger: true,
+    debug: true,
+    connectionTimeout: 30000,
+    greetingTimeout: 30000,
+    socketTimeout: 30000
 });
 
 transporter.verify((err)=>{
@@ -249,7 +251,7 @@ ${billingData.notes || "None"}
 
 await transporter.sendMail({
 
-    from: process.env.EMAIL_USER,
+    from: process.env.SMTP_USER,
 
     to: process.env.EMAIL_TO,
 
@@ -263,7 +265,7 @@ if(billingData.email){
 
 await transporter.sendMail({
 
-    from: process.env.EMAIL_USER,
+    from: process.env.SMTP_USER,
 
     to: billingData.email,
 
