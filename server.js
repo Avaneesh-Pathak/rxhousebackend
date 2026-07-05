@@ -2,7 +2,10 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
-require("dotenv").config();
+// require("dotenv").config();
+if (process.env.NODE_ENV !== "production") {
+    require("dotenv").config();
+}
 const nodemailer = require("nodemailer");
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -13,7 +16,8 @@ app.use(cors({
         "http://127.0.0.1:5500",
         "https://rxhouse.netlify.app",
         "https://pharmacies.doctor",
-        "https://www.pharmacies.doctor"
+        "https://www.pharmacies.doctor",
+        "https://pd.pharmacies.doctor"
     ],
     methods: ["GET","POST","PUT","DELETE","OPTIONS"],
     allowedHeaders: ["Content-Type","Authorization"],
@@ -32,8 +36,8 @@ const DATABASE_URL = process.env.DATABASE_URL || 'postgres://postgres:postgres@l
 const pool = new Pool({ connectionString: DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
 
 const transporter = nodemailer.createTransport({
-    host: "smtp-relay.brevo.com",
-    port: 587,
+    host: "smtp.gmail.com",
+    port: 465,
     secure: true,
     auth: {
         user: process.env.SMTP_USER,
