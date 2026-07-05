@@ -30,6 +30,35 @@ app.use((req, res, next) => {
 const DATABASE_URL = process.env.DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/rxhouse';
 const pool = new Pool({ connectionString: DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
 
+const dns = require("dns");
+
+dns.lookup("smtp.gmail.com", (err, address) => {
+    console.log("DNS TEST");
+    console.log(err || address);
+});
+const net = require("net");
+
+const socket = net.createConnection({
+    host: "smtp.gmail.com",
+    port: 465
+});
+
+socket.setTimeout(10000);
+
+socket.on("connect", () => {
+    console.log("CONNECTED TO GMAIL");
+    socket.destroy();
+});
+
+socket.on("timeout", () => {
+    console.log("TIMEOUT CONNECTING TO GMAIL");
+    socket.destroy();
+});
+
+socket.on("error", e => {
+    console.log("SOCKET ERROR");
+    console.log(e);
+});
 const transporter = nodemailer.createTransport({
     host: "smtp.gmail.com",
     port: 465,
