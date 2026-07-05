@@ -38,20 +38,25 @@ const transporter = nodemailer.createTransport({
     auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS
-    }
+    },
+    connectionTimeout: 30000,
+    greetingTimeout: 30000,
+    socketTimeout: 30000
 });
-transporter.verify((err)=>{
+console.log({
+    user: process.env.SMTP_USER,
+    passExists: !!process.env.SMTP_PASS
+});
+transporter.verify((err, success) => {
 
-    if(err){
+    if (err) {
 
-        console.log("Mail Error");
+        console.error("SMTP VERIFY FAILED");
+        console.error(err);
 
-        console.log(err);
+    } else {
 
-    }else{
-
-        console.log("Mail Ready");
-
+        console.log("SMTP Connected");
     }
 
 });
@@ -245,7 +250,7 @@ ${billingData.notes || "None"}
 
 await transporter.sendMail({
 
-    from: process.env.EMAIL_USER,
+    from: process.env.SMTP_USER,
 
     to: process.env.EMAIL_TO,
 
@@ -259,7 +264,7 @@ if(billingData.email){
 
 await transporter.sendMail({
 
-    from: process.env.EMAIL_USER,
+    from: process.env.SMTP_USER,
 
     to: billingData.email,
 
