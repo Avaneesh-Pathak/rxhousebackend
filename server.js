@@ -40,7 +40,7 @@ const net = require("net");
 
 const socket = net.createConnection({
     host: "smtp.gmail.com",
-    port: 465
+    port: 587
 });
 
 socket.setTimeout(10000);
