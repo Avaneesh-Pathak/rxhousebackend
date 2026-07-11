@@ -1,8 +1,6 @@
-
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
-// require("dotenv").config();
 if (process.env.NODE_ENV !== "production") {
     require("dotenv").config();
 }
@@ -14,17 +12,18 @@ app.use(cors({
     origin: [
         "http://localhost:5500",
         "http://127.0.0.1:5500",
-        "https://rxhouse.netlify.app",
         "https://pharmacies.doctor",
         "https://www.pharmacies.doctor",
-        "https://pd.pharmacies.doctor"
+        "https://pd.pharmacies.doctor",
+        "http://192.168.1.7:5500",
     ],
     methods: ["GET","POST","PUT","DELETE","OPTIONS"],
     allowedHeaders: ["Content-Type","Authorization"],
     credentials: true
 }));
 
-app.use(express.json());
+// Must be set to allow larger JSON image payloads
+app.use(express.json({ limit: '10mb' }));
 
 app.use((req, res, next) => {
     console.log(`${req.method} ${req.url}`);
@@ -36,7 +35,7 @@ const DATABASE_URL = process.env.DATABASE_URL || 'postgres://postgres:postgres@l
 const pool = new Pool({ connectionString: DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
 
 const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
+    host: "smtp.hostinger.com",
     port: 465,
     secure: true,
     auth: {
@@ -44,28 +43,16 @@ const transporter = nodemailer.createTransport({
         pass: process.env.SMTP_PASS
     },
     logger: true,
-    debug: true,
-    connectionTimeout: 30000,
-    greetingTimeout: 30000,
-    socketTimeout: 30000
+    debug: true
 });
 
 transporter.verify((err)=>{
-
     if(err){
-
-        console.log("Mail Error");
-
-        console.log(err);
-
+        console.log("Mail Error", err);
     }else{
-
         console.log("Mail Ready");
-
     }
-
 });
-
 
 async function createTables() {
   await pool.query(`
@@ -111,6 +98,23 @@ async function createTables() {
       linePrice NUMERIC
     );
   `);
+
+  await pool.query(`
+  CREATE TABLE IF NOT EXISTS blogs (
+      id SERIAL PRIMARY KEY,
+      title VARCHAR(255) NOT NULL,
+      slug VARCHAR(255) UNIQUE NOT NULL,
+      excerpt TEXT,
+      content TEXT NOT NULL,
+      featured_image TEXT,
+      category VARCHAR(100),
+      author VARCHAR(100) DEFAULT 'RxHouse',
+      tags TEXT,
+      is_published BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+  `);
 }
 
 async function seedProductsIfEmpty() {
@@ -135,6 +139,15 @@ async function seedProductsIfEmpty() {
     }
   }
 }
+
+app.get("/debug/orders", async (req, res) => {
+    try {
+        const result = await pool.query("SELECT * FROM orders");
+        res.json(result.rows);
+    } catch (e) {
+        res.status(500).json(e);
+    }
+});
 
 app.get('/api/products', async (req, res) => {
   try { const { rows } = await pool.query('SELECT * FROM products ORDER BY id'); res.json(rows); }
@@ -173,119 +186,66 @@ app.post('/api/orders', async (req, res) => {
 
 const html = `
 <h2>New Rx House Order</h2>
-
 <h3>Customer</h3>
-
 <table border="1" cellpadding="8">
-
 <tr><td>Name</td><td>${billingData.firstName} ${billingData.lastName}</td></tr>
-
 <tr><td>Email</td><td>${billingData.email}</td></tr>
-
 <tr><td>Phone</td><td>${billingData.phone}</td></tr>
-
 <tr><td>Street</td><td>${billingData.street}</td></tr>
-
 <tr><td>City</td><td>${billingData.city}</td></tr>
-
 <tr><td>State</td><td>${billingData.state}</td></tr>
-
 <tr><td>Zip</td><td>${billingData.zip}</td></tr>
-
 <tr><td>Country</td><td>${billingData.country}</td></tr>
-
 </table>
-
 <br>
-
 <h3>Medicines</h3>
-
 <table border="1" cellpadding="8">
-
 <tr>
-
 <th>Name</th>
-
 <th>Qty</th>
-
 <th>Price</th>
-
 </tr>
-
 ${items.map(i=>`
-
 <tr>
-
 <td>${i.name}</td>
-
 <td>${i.pillQty}</td>
-
 <td>$${i.linePrice}</td>
-
 </tr>
-
 `).join("")}
-
 </table>
-
 <h3>Total</h3>
-
 <p>
-
 Subtotal : $${subtotal}
-
 <br>
-
 Tax : $${tax}
-
 <br>
-
 Grand Total : $${total}
-
 </p>
-
 <p>
-
 Notes :
-
 ${billingData.notes || "None"}
-
 </p>
 `;
 
 await transporter.sendMail({
-
     from: process.env.SMTP_USER,
-
     to: process.env.EMAIL_TO,
-
     subject: `New Order ${orderId}`,
-
     html
-
 });
 
 if(billingData.email){
-
 await transporter.sendMail({
-
     from: process.env.SMTP_USER,
-
     to: billingData.email,
-
     subject:"Order Confirmation",
-
     html:`
     <h2>Thank You</h2>
-
     <p>Your order has been received.</p>
     <p>One of our representatives will contact you shortly.</p>
-
     <p>Order ID : ${orderId}</p>
-
     `
 });
-
 }
     res.json({ id: orderId });
   } catch (err) { res.status(500).json({ error: 'Unable to save order', detail: err.message }); }
@@ -303,50 +263,173 @@ app.get('/api/orders', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Unable to fetch orders' }); }
 });
 
-
-
-// Delete scripts - for testing only, not exposed in production
 app.delete('/api/orders', async (req, res) => {
   try {
-
     await pool.query('DELETE FROM order_items');
     await pool.query('DELETE FROM orders');
-
-    res.json({
-      success: true,
-      message: 'All orders deleted'
-    });
-
+    res.json({ success: true, message: 'All orders deleted' });
   } catch (err) {
-
     console.error(err);
-
-    res.status(500).json({
-      error: err.message
-    });
-
+    res.status(500).json({ error: err.message });
   }
 });
 
 app.delete('/api/social-clicks', async (req, res) => {
   try {
-
     await pool.query('DELETE FROM social_clicks');
-
-    res.json({
-      success: true,
-      message: 'All social clicks deleted'
-    });
-
+    res.json({ success: true, message: 'All social clicks deleted' });
   } catch (err) {
-
     console.error(err);
-
-    res.status(500).json({
-      error: err.message
-    });
-
+    res.status(500).json({ error: err.message });
   }
+});
+
+// GET PUBLIC BLOGS
+app.get("/api/blogs", async (req, res) => {
+    try {
+        const { rows } = await pool.query(`
+            SELECT id, title, slug, excerpt, featured_image, category, author, created_at 
+            FROM blogs 
+            WHERE is_published = true 
+            ORDER BY created_at DESC
+        `);
+        res.json(rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Unable to fetch blogs" });
+    }
+});
+
+// GET SINGLE BLOG
+app.get("/api/blogs/:slug", async (req, res) => {
+    try {
+        const { rows } = await pool.query("SELECT * FROM blogs WHERE slug=$1", [req.params.slug]);
+        if (!rows.length) {
+            return res.status(404).json({ error: "Blog not found" });
+        }
+        res.json(rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Server Error" });
+    }
+});
+
+// GET ALL BLOGS (Drafts + Published for admin)
+app.get("/api/admin/blogs", async (req, res) => {
+    try {
+        const { rows } = await pool.query("SELECT * FROM blogs ORDER BY created_at DESC");
+        res.json(rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Unable to fetch all blogs" });
+    }
+});
+
+// POST BLOG
+app.post("/api/blogs", async (req, res) => {
+    const { title, slug, excerpt, content, featured_image, category, author, tags, is_published } = req.body;
+    try {
+        const query = `
+            INSERT INTO blogs (title, slug, excerpt, content, featured_image, category, author, tags, is_published)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            RETURNING *
+        `;
+        const values = [
+            title, 
+            slug, 
+            excerpt || '', 
+            content, 
+            featured_image || '', 
+            category || '', 
+            author || 'RxHouse', 
+            tags || '', 
+            is_published !== undefined ? is_published : true
+        ];
+        const { rows } = await pool.query(query, values);
+        res.status(201).json({ success: true, message: "Blog post created successfully!", data: rows[0] });
+    } catch (err) {
+        console.error(err);
+        if (err.code === '23505') {
+            return res.status(400).json({ error: "A blog post with this URL slug already exists." });
+        }
+        res.status(500).json({ error: "Unable to create blog post on the server." });
+    }
+});
+
+// PUT BLOG
+app.put("/api/blogs/:id", async (req, res) => {
+    const { id } = req.params;
+    const { title, slug, excerpt, content, featured_image, category, author, tags, is_published } = req.body;
+    try {
+        const query = `
+            UPDATE blogs
+            SET title = $1, slug = $2, excerpt = $3, content = $4, featured_image = $5, 
+                category = $6, author = $7, tags = $8, is_published = $9, updated_at = CURRENT_TIMESTAMP
+            WHERE id = $10
+            RETURNING *
+        `;
+        const values = [title, slug, excerpt, content, featured_image, category, author, tags, is_published, id];
+        const { rows } = await pool.query(query, values);
+        if (rows.length === 0) {
+            return res.status(404).json({ error: "Blog post not found" });
+        }
+        res.json({ success: true, message: "Blog updated successfully", data: rows[0] });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Unable to update blog post" });
+    }
+});
+
+// NATIVE BASE64 IMAGE FILE SAVING
+const fs = require('fs');
+const path = require('path');
+
+app.use('/images', express.static(path.join(__dirname, 'images')));
+
+app.post('/api/upload-base64', (req, res) => {
+    const { image } = req.body;
+    if (!image) {
+        return res.status(400).json({ error: 'No image data provided' });
+    }
+    try {
+        const imagesDir = path.join(__dirname, 'images');
+        if (!fs.existsSync(imagesDir)) {
+            fs.mkdirSync(imagesDir, { recursive: true });
+        }
+
+        const matches = image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+        if (!matches || matches.length !== 3) {
+            return res.status(400).json({ error: 'Invalid image data' });
+        }
+
+        const ext = matches[1].split('/')[1];
+        const base64Data = matches[2];
+        const buffer = Buffer.from(base64Data, 'base64');
+
+        const fileName = `${Date.now()}-${Math.round(Math.random() * 1e9)}.${ext}`;
+        const filePath = path.join(imagesDir, fileName);
+
+        fs.writeFileSync(filePath, buffer);
+        res.json({ success: true, imageUrl: `images/${fileName}` });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to write file to disk' });
+    }
+});
+
+// DELETE BLOG
+app.delete("/api/blogs/:id", async (req, res) => {
+    const { id } = req.params;
+    try {
+        const { rowCount } = await pool.query("DELETE FROM blogs WHERE id = $1", [id]);
+        if (rowCount === 0) {
+            return res.status(404).json({ error: "Blog post not found" });
+        }
+        res.json({ success: true, message: "Blog deleted successfully" });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Unable to delete blog post" });
+    }
 });
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
@@ -355,16 +438,4 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
   try { await createTables(); await seedProductsIfEmpty(); app.listen(PORT, () => console.log(`Rx House backend (Postgres) started at http://localhost:${PORT}`)); }
   catch (err) { console.error('Initialization failed', err); process.exit(1); }
 })();
-
-
-// to delete data open browser console and run:
-// fetch(
-//   'https://rxhousebackend.onrender.com/api/orders',
-//   { method: 'DELETE' }
-// ).then(r => r.json()).then(console.log)
-
-// fetch(
-//   'https://rxhousebackend.onrender.com/api/social-clicks',
-//   { method: 'DELETE' }
-// ).then(r => r.json()).then(console.log)
 
