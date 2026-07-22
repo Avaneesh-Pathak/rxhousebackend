@@ -542,6 +542,22 @@ app.delete("/api/blogs/:id", async (req, res) => {
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
+app.delete("/api/contact", async (req, res) => {
+    try {
+        await pool.query("TRUNCATE TABLE contact_messages RESTART IDENTITY");
+
+        res.json({
+            success: true,
+            message: "Deleted successfully"
+        });
+    } catch (err) {
+        res.status(500).json({
+            success: false,
+            error: err.message
+        });
+    }
+});
+
 (async function init() {
   try { await createTables(); await seedProductsIfEmpty(); app.listen(PORT, () => console.log(`Rx House backend (Postgres) started at http://localhost:${PORT}`)); }
   catch (err) { console.error('Initialization failed', err); process.exit(1); }
