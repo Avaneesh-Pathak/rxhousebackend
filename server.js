@@ -115,6 +115,19 @@ async function createTables() {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS contact_messages (
+        id SERIAL PRIMARY KEY,
+        first_name TEXT NOT NULL,
+        last_name TEXT NOT NULL,
+        email TEXT NOT NULL,
+        phone TEXT,
+        subject TEXT,
+        message TEXT NOT NULL,
+        ip_address TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    `);
 }
 
 async function seedProductsIfEmpty() {
@@ -380,6 +393,101 @@ app.put("/api/blogs/:id", async (req, res) => {
     }
 });
 
+app.post("/api/contact", async (req, res) => {
+    const { first_name, last_name, email, phone, subject, message } = req.body;
+
+    if (!first_name || !last_name || !email || !message) {
+        return res.status(400).json({ success: false, error: "Please fill in all required fields." });
+    }
+
+    try {
+        await pool.query(`
+            INSERT INTO contact_messages (first_name, last_name, email, phone, subject, message, ip_address)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `, [first_name, last_name, email, phone || '', subject || '', message, req.ip]);
+
+        // Email to admin
+        await transporter.sendMail({
+            from: process.env.SMTP_USER,
+            to: process.env.EMAIL_TO,
+            subject: `New Contact Form: ${subject || 'General Inquiry'}`,
+            html: `
+                <h2>New Contact Message</h2>
+                <p><b>Name:</b> ${first_name} ${last_name}</p>
+                <p><b>Email:</b> ${email}</p>
+                <p><b>Phone:</b> ${phone || 'Not provided'}</p>
+                <p><b>Subject:</b> ${subject}</p>
+                <p><b>Message:</b></p>
+                <blockquote style="background:#f4f4f4; padding:10px;">${message.replace(/\n/g, '<br>')}</blockquote>
+            `
+        });
+
+        res.json({
+            success: true,
+            message: "Your message has been sent successfully!"
+        });
+
+    } catch(err) {
+        console.error("Contact API Error:", err);
+        res.status(500).json({ success: false, error: "Server error handling contact submission." });
+    }
+});
+
+app.get("/api/contact", async(req,res)=>{
+
+    try{
+
+        const {rows}=await pool.query(`
+            SELECT *
+            FROM contact_messages
+            ORDER BY created_at DESC
+        `);
+
+        res.json(rows);
+
+    }catch(err){
+
+        res.status(500).json({
+            error:err.message
+        });
+
+    }
+
+});
+
+app.get("/api/contact/stats", async(req,res)=>{
+
+    try{
+
+        const total=await pool.query(`
+            SELECT COUNT(*) total
+            FROM contact_messages
+        `);
+
+        const today=await pool.query(`
+            SELECT COUNT(*) today
+            FROM contact_messages
+            WHERE DATE(created_at)=CURRENT_DATE
+        `);
+
+        res.json({
+
+            total:Number(total.rows[0].total),
+
+            today:Number(today.rows[0].today)
+
+        });
+
+    }catch(err){
+
+        res.status(500).json({
+            error:err.message
+        });
+
+    }
+
+});
+
 // NATIVE BASE64 IMAGE FILE SAVING
 const fs = require('fs');
 const path = require('path');
@@ -439,3 +547,43 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
   catch (err) { console.error('Initialization failed', err); process.exit(1); }
 })();
 
+
+
+
+
+
+
+
+
+// fetch("https://pd.pharmacies.doctor/api/orders", {
+//     method: "DELETE"
+// })
+// .then(res => res.json())
+// .then(data => {
+//     console.log("Orders deleted:", data);
+// })
+// .catch(console.error);
+// Delete all social clicks
+// fetch("https://pd.pharmacies.doctor/api/social-clicks", {
+//     method: "DELETE"
+// })
+// .then(res => res.json())
+// .then(data => {
+//     console.log("Social clicks deleted:", data);
+// })
+// .catch(console.error);
+// Delete both at once
+// Promise.all([
+//     fetch("https://pd.pharmacies.doctor/api/orders", {
+//         method: "DELETE"
+//     }).then(r => r.json()),
+
+//     fetch("https://pd.pharmacies.doctor/api/social-clicks", {
+//         method: "DELETE"
+//     }).then(r => r.json())
+// ])
+// .then(results => {
+//     console.log("Done:", results);
+//     alert("All orders and social clicks deleted.");
+// })
+// .catch(console.error);
