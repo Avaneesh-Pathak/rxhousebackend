@@ -558,7 +558,6 @@ app.delete("/api/contact", async (req, res) => {
     }
 });
 
-
 (async function init() {
   try { await createTables(); await seedProductsIfEmpty(); app.listen(PORT, () => console.log(`Rx House backend (Postgres) started at http://localhost:${PORT}`)); }
   catch (err) { console.error('Initialization failed', err); process.exit(1); }
