@@ -558,28 +558,6 @@ app.delete("/api/contact", async (req, res) => {
     }
 });
 
-// ==========================================
-// FRONTEND ROUTING & CLEAN URLS
-// ==========================================
-
-// 1. Serve static files (HTML, CSS, JS, images) from root or public folder
-app.use(express.static(__dirname));
-
-// 2. Clean URL for main blog page (/blog -> blog.html)
-app.get('/blog', (req, res) => {
-    res.sendFile(path.join(__dirname, 'blog.html'));
-});
-
-// 3. Clean URL for single blog posts (/blog/any-slug-name -> blog-post.html)
-app.get('/blog/:slug', (req, res) => {
-    res.sendFile(path.join(__dirname, 'blog-post.html'));
-});
-
-// 4. Catch-all fallback for main site sections (optional)
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
-
 
 (async function init() {
   try { await createTables(); await seedProductsIfEmpty(); app.listen(PORT, () => console.log(`Rx House backend (Postgres) started at http://localhost:${PORT}`)); }
