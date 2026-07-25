@@ -571,8 +571,78 @@ app.get('/blog', (req, res) => {
 });
 
 // 3. Clean URL for single blog posts (/blog/any-slug-name -> blog-post.html)
-app.get('/blog/:slug', (req, res) => {
-    res.sendFile(path.join(__dirname, 'blog-post.html'));
+app.get("/blog/:slug", async (req, res) => {
+
+    try {
+
+        const slug = req.params.slug;
+
+        const { rows } = await pool.query(
+            "SELECT * FROM blogs WHERE slug=$1 AND is_published=true LIMIT 1",
+            [slug]
+        );
+
+        if (!rows.length) {
+            return res.status(404).send("Blog not found");
+        }
+
+        const blog = rows[0];
+
+        const siteUrl = "https://pharmacies.doctor";
+
+        let image = `${siteUrl}/images/default-blog.webp`;
+
+        if (blog.featured_image) {
+
+            if (blog.featured_image.startsWith("http")) {
+
+                image = blog.featured_image;
+
+            } else {
+
+                image = `${siteUrl}/${blog.featured_image.replace(/^\/+/, "")}`;
+
+            }
+
+        }
+
+        let html = fs.readFileSync(
+            path.join(__dirname, "../public_html/blog-post.html"),
+            "utf8"
+        );
+
+        html = html.replace(
+            /<title.*?>.*?<\/title>/i,
+            `<title>${blog.title} | Pharmacies Doctor</title>`
+        );
+
+        html = html.replace(/BLOG_TITLE/g, blog.title);
+
+        html = html.replace(
+            /BLOG_DESCRIPTION/g,
+            blog.excerpt || ""
+        );
+
+        html = html.replace(
+            /BLOG_CANONICAL/g,
+            `${siteUrl}/blog/${blog.slug}`
+        );
+
+        html = html.replace(
+            /BLOG_IMAGE/g,
+            image
+        );
+
+        res.send(html);
+
+    } catch (err) {
+
+        console.error(err);
+
+        res.status(500).send("Server Error");
+
+    }
+
 });
 
 // 4. Catch-all fallback for main site sections (optional)
