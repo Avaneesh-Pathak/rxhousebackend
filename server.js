@@ -1,10 +1,14 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
+const fs = require('fs');
+const path = require('path');
+const nodemailer = require("nodemailer");
+
 if (process.env.NODE_ENV !== "production") {
     require("dotenv").config();
 }
-const nodemailer = require("nodemailer");
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -53,6 +57,14 @@ transporter.verify((err)=>{
         console.log("Mail Ready");
     }
 });
+
+// Helper function to extract YouTube video ID
+function getYouTubeId(url) {
+    if (!url) return null;
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+    const match = url.match(regExp);
+    return (match && match[2].length === 11) ? match[2] : null;
+}
 
 async function createTables() {
   await pool.query(`
@@ -313,7 +325,7 @@ app.get("/api/blogs", async (req, res) => {
     }
 });
 
-// GET SINGLE BLOG
+// GET SINGLE BLOG API
 app.get("/api/blogs/:slug", async (req, res) => {
     try {
         const { rows } = await pool.query("SELECT * FROM blogs WHERE slug=$1", [req.params.slug]);
@@ -434,64 +446,39 @@ app.post("/api/contact", async (req, res) => {
 });
 
 app.get("/api/contact", async(req,res)=>{
-
     try{
-
         const {rows}=await pool.query(`
             SELECT *
             FROM contact_messages
             ORDER BY created_at DESC
         `);
-
         res.json(rows);
-
     }catch(err){
-
-        res.status(500).json({
-            error:err.message
-        });
-
+        res.status(500).json({ error:err.message });
     }
-
 });
 
 app.get("/api/contact/stats", async(req,res)=>{
-
     try{
-
         const total=await pool.query(`
             SELECT COUNT(*) total
             FROM contact_messages
         `);
-
         const today=await pool.query(`
             SELECT COUNT(*) today
             FROM contact_messages
             WHERE DATE(created_at)=CURRENT_DATE
         `);
-
         res.json({
-
             total:Number(total.rows[0].total),
-
             today:Number(today.rows[0].today)
-
         });
-
     }catch(err){
-
-        res.status(500).json({
-            error:err.message
-        });
-
+        res.status(500).json({ error:err.message });
     }
-
 });
 
 // NATIVE BASE64 IMAGE FILE SAVING
-const fs = require('fs');
-const path = require('path');
-
 app.use('/images', express.static(path.join(__dirname, 'images')));
 
 app.post('/api/upload-base64', (req, res) => {
@@ -545,36 +532,31 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.delete("/api/contact", async (req, res) => {
     try {
         await pool.query("TRUNCATE TABLE contact_messages RESTART IDENTITY");
-
-        res.json({
-            success: true,
-            message: "Deleted successfully"
-        });
+        res.json({ success: true, message: "Deleted successfully" });
     } catch (err) {
-        res.status(500).json({
-            success: false,
-            error: err.message
-        });
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
 // ==========================================
-// FRONTEND ROUTING & CLEAN URLS
+// FRONTEND ROUTING & CLEAN URLS (SSR META)
 // ==========================================
 
-// 1. Serve static files (HTML, CSS, JS, images) from root or public folder
+// 1. Serve static files (HTML, CSS, JS, images) from root
 app.use(express.static(__dirname));
 
 // 2. Clean URL for main blog page (/blog -> blog.html)
 app.get('/blog', (req, res) => {
-    res.sendFile(path.join(__dirname, 'blog.html'));
+    let blogHtmlPath = path.join(__dirname, 'blog.html');
+    if (!fs.existsSync(blogHtmlPath)) {
+        blogHtmlPath = path.join(__dirname, '../public_html/blog.html');
+    }
+    res.sendFile(blogHtmlPath);
 });
 
-// 3. Clean URL for single blog posts (/blog/any-slug-name -> blog-post.html)
+// 3. Clean URL for single blog posts with SERVER-SIDE META INJECTION
 app.get("/blog/:slug", async (req, res) => {
-
     try {
-
         const slug = req.params.slug;
 
         const { rows } = await pool.query(
@@ -583,85 +565,96 @@ app.get("/blog/:slug", async (req, res) => {
         );
 
         if (!rows.length) {
-            return res.status(404).send("Blog not found");
+            return res.status(404).send("Blog post not found");
         }
 
         const blog = rows[0];
-
         const siteUrl = "https://pharmacies.doctor";
 
-        let image = `${siteUrl}/images/default-blog.webp`;
-
-        if (blog.featured_image) {
-
-            if (blog.featured_image.startsWith("http")) {
-
-                image = blog.featured_image;
-
-            } else {
-
-                image = `${siteUrl}/${blog.featured_image.replace(/^\/+/, "")}`;
-
-            }
-
+        // Determine correct template file location
+        let templatePath = path.join(__dirname, 'blog-post.html');
+        if (!fs.existsSync(templatePath)) {
+            templatePath = path.join(__dirname, '../public_html/blog-post.html');
         }
 
-        let html = fs.readFileSync(
-            path.join(__dirname, "../public_html/blog-post.html"),
-            "utf8"
-        );
+        if (!fs.existsSync(templatePath)) {
+            return res.status(500).send("Blog post HTML template not found on server.");
+        }
 
-        html = html.replace(
-            /<title.*?>.*?<\/title>/i,
-            `<title>${blog.title} | Pharmacies Doctor</title>`
-        );
+        let html = fs.readFileSync(templatePath, "utf8");
 
-        html = html.replace(/BLOG_TITLE/g, blog.title);
+        // Format Image URL (Handles YouTube videos vs uploaded images vs fallback logo)
+        let image = `${siteUrl}/images/pdlogo.png`;
 
-        html = html.replace(
-            /BLOG_DESCRIPTION/g,
-            blog.excerpt || ""
-        );
+        if (blog.featured_image) {
+            const youtubeId = getYouTubeId(blog.featured_image);
+            if (youtubeId) {
+                image = `https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`;
+            } else if (blog.featured_image.startsWith("http")) {
+                image = blog.featured_image;
+            } else {
+                image = `${siteUrl}/${blog.featured_image.replace(/^\/+/, "")}`;
+            }
+        }
 
-        html = html.replace(
-            /BLOG_CANONICAL/g,
-            `${siteUrl}/blog/${blog.slug}`
-        );
+        // Sanitize strings for safe HTML attribute replacement
+        const safeTitle = (blog.title || "Pharmacies Doctor Blog").replace(/"/g, '&quot;');
+        const safeDescription = (blog.excerpt || blog.description || blog.content || '')
+            .replace(/<[^>]*>?/gm, '')
+            .replace(/"/g, '&quot;')
+            .substring(0, 160)
+            .trim();
 
-        html = html.replace(
-            /BLOG_IMAGE/g,
-            image
-        );
+        const canonicalUrl = `${siteUrl}/blog/${blog.slug}`;
 
+        // 1. Replace placeholder markers if present
+        html = html.replace(/BLOG_TITLE/g, safeTitle);
+        html = html.replace(/BLOG_DESCRIPTION/g, safeDescription);
+        html = html.replace(/BLOG_CANONICAL/g, canonicalUrl);
+        html = html.replace(/BLOG_IMAGE/g, image);
+
+        // 2. Dynamic Tag Replacement via Regex (Guarantees Open Graph / WhatsApp picks it up)
+        html = html.replace(/<title.*?>.*?<\/title>/i, `<title>${safeTitle} | Pharmacies Doctor</title>`);
+        
+        // Open Graph Regex Replacement
+        html = html.replace(/<meta\s+property="og:title"\s+content="[^"]*"/i, `<meta property="og:title" content="${safeTitle} | Pharmacies Doctor"`);
+        html = html.replace(/<meta\s+property="og:description"\s+content="[^"]*"/i, `<meta property="og:description" content="${safeDescription}"`);
+        html = html.replace(/<meta\s+property="og:image"\s+content="[^"]*"/i, `<meta property="og:image" content="${image}"`);
+        html = html.replace(/<meta\s+property="og:url"\s+content="[^"]*"/i, `<meta property="og:url" content="${canonicalUrl}"`);
+
+        // Twitter Card Regex Replacement
+        html = html.replace(/<meta\s+name="twitter:title"\s+content="[^"]*"/i, `<meta name="twitter:title" content="${safeTitle} | Pharmacies Doctor"`);
+        html = html.replace(/<meta\s+name="twitter:description"\s+content="[^"]*"/i, `<meta name="twitter:description" content="${safeDescription}"`);
+        html = html.replace(/<meta\s+name="twitter:image"\s+content="[^"]*"/i, `<meta name="twitter:image" content="${image}"`);
+
+        res.setHeader('Content-Type', 'text/html');
         res.send(html);
 
     } catch (err) {
-
-        console.error(err);
-
-        res.status(500).send("Server Error");
-
+        console.error("Error serving blog post with SSR meta:", err);
+        res.status(500).send("Server Error serving blog post.");
     }
-
 });
 
-// 4. Catch-all fallback for main site sections (optional)
+// 4. Catch-all fallback for main site sections
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
+    let indexHtmlPath = path.join(__dirname, 'index.html');
+    if (!fs.existsSync(indexHtmlPath)) {
+        indexHtmlPath = path.join(__dirname, '../public_html/index.html');
+    }
+    res.sendFile(indexHtmlPath);
 });
-
 
 (async function init() {
-  try { await createTables(); await seedProductsIfEmpty(); app.listen(PORT, () => console.log(`Rx House backend (Postgres) started at http://localhost:${PORT}`)); }
-  catch (err) { console.error('Initialization failed', err); process.exit(1); }
+  try { 
+    await createTables(); 
+    await seedProductsIfEmpty(); 
+    app.listen(PORT, () => console.log(`Rx House backend (Postgres) started at http://localhost:${PORT}`)); 
+  } catch (err) { 
+    console.error('Initialization failed', err); 
+    process.exit(1); 
+  }
 })();
-
-
-
-
-
-
-
 
 
 // fetch("https://pd.pharmacies.doctor/api/orders", {
