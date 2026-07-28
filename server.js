@@ -656,6 +656,7 @@ app.get("/blog/:slug", async (req, res) => {
 
         const blog = rows[0];
         const siteUrl = "https://pharmacies.doctor";
+        const imageBase = "https://pd.pharmacies.doctor";
 
         // Determine correct template file location
         const templatePath = resolveBlogPostTemplatePath();
@@ -667,16 +668,22 @@ app.get("/blog/:slug", async (req, res) => {
         let html = readTemplateCached(templatePath);
 
         // Format Image URL for OG/Twitter Cards
-        let image = `${siteUrl}/images/pdlogo.png`;
+        const imageBase = "https://pd.pharmacies.doctor";
+
+        let image = `${imageBase}/images/pdlogo.png`;
 
         if (blog.featured_image) {
+
             const youtubeId = getYouTubeId(blog.featured_image);
+
             if (youtubeId) {
                 image = `https://img.youtube.com/vi/${youtubeId}/maxresdefault.jpg`;
-            } else if (blog.featured_image.startsWith("http")) {
+            }
+            else if (blog.featured_image.startsWith("http")) {
                 image = blog.featured_image;
-            } else {
-                image = `${siteUrl}/${blog.featured_image.replace(/^\/+/, "")}`;
+            }
+            else {
+                image = `${imageBase}/${blog.featured_image.replace(/^\/+/, "")}`;
             }
         }
 
