@@ -656,7 +656,6 @@ app.get("/blog/:slug", async (req, res) => {
 
         const blog = rows[0];
         const siteUrl = "https://pharmacies.doctor";
-        const imageBase = "https://pd.pharmacies.doctor";
 
         // Determine correct template file location
         const templatePath = resolveBlogPostTemplatePath();
