@@ -1,3 +1,73 @@
-rxhouse.db
-node_modules
-images
+# ==========================
+# Node.js
+# ==========================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ==========================
+# Environment Variables
+# ==========================
+.env
+.env.*
+!.env.example
+
+# ==========================
+# Uploaded Images
+# ==========================
+images/
+!images/.gitkeep
+
+# ==========================
+# Logs
+# ==========================
+logs/
+*.log
+stderr.log
+stdout.log
+
+# ==========================
+# Runtime Files
+# ==========================
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# ==========================
+# Coverage
+# ==========================
+coverage/
+.nyc_output/
+
+# ==========================
+# Build / Cache
+# ==========================
+dist/
+build/
+.cache/
+.tmp/
+temp/
+
+# ==========================
+# IDE
+# ==========================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ==========================
+# OS Files
+# ==========================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==========================
+# Optional
+# ==========================
+*.bak
+*.tmp
