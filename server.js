@@ -582,7 +582,54 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
 // FRONTEND ROUTING & SSR META INJECTION
 // ==========================================
 
-app.use(express.static(__dirname));
+// Simple in-memory template cache so we don't hit the disk on every
+// blog-post request. Cleared automatically if the file changes on disk
+// (checked via mtime), so editing blog-post.html locally still works
+// without a server restart.
+const templateCache = new Map();
+function readTemplateCached(filePath) {
+    const stat = fs.statSync(filePath);
+    const cached = templateCache.get(filePath);
+    if (cached && cached.mtimeMs === stat.mtimeMs) {
+        return cached.content;
+    }
+    const content = fs.readFileSync(filePath, 'utf8');
+    templateCache.set(filePath, { content, mtimeMs: stat.mtimeMs });
+    return content;
+}
+
+function resolveBlogPostTemplatePath() {
+    let templatePath = path.join(__dirname, 'blog-post.html');
+    if (!fs.existsSync(templatePath)) {
+        templatePath = path.join(__dirname, '../public_html/blog-post.html');
+    }
+    return templatePath;
+}
+
+// IMPORTANT: This redirect must be registered BEFORE express.static(__dirname)
+// below. Blog cards / old links that still point to the raw file
+// (blog-post.html?slug=xxx) get bounced to the clean, SSR-rendered
+// /blog/:slug route so that WhatsApp/Telegram/Facebook/X link-preview
+// crawlers (and real visitors) always see the real title, description,
+// and image instead of the unresolved {{BLOG_TITLE}} placeholders.
+app.get('/blog-post.html', (req, res) => {
+    const slug = req.query.slug;
+    if (slug) {
+        return res.redirect(301, `/blog/${encodeURIComponent(slug)}`);
+    }
+    res.redirect('/blog');
+});
+
+app.use(express.static(__dirname, {
+    // Long cache for static assets (images, css, js); HTML is excluded so
+    // template/meta updates are picked up immediately.
+    maxAge: '1d',
+    setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html')) {
+            res.setHeader('Cache-Control', 'no-cache');
+        }
+    }
+}));
 
 // Clean URL for main blog page (/blog -> blog.html)
 app.get('/blog', (req, res) => {
@@ -611,16 +658,13 @@ app.get("/blog/:slug", async (req, res) => {
         const siteUrl = "https://pharmacies.doctor";
 
         // Determine correct template file location
-        let templatePath = path.join(__dirname, 'blog-post.html');
-        if (!fs.existsSync(templatePath)) {
-            templatePath = path.join(__dirname, '../public_html/blog-post.html');
-        }
+        const templatePath = resolveBlogPostTemplatePath();
 
         if (!fs.existsSync(templatePath)) {
             return res.status(500).send("Blog post HTML template not found on server.");
         }
 
-        let html = fs.readFileSync(templatePath, "utf8");
+        let html = readTemplateCached(templatePath);
 
         // Format Image URL for OG/Twitter Cards
         let image = `${siteUrl}/images/pdlogo.png`;
@@ -653,6 +697,7 @@ app.get("/blog/:slug", async (req, res) => {
         html = html.replace(/{{BLOG_IMAGE}}/g, image);
 
         res.setHeader('Content-Type', 'text/html');
+        res.setHeader('Cache-Control', 'no-cache');
         res.send(html);
 
     } catch (err) {
