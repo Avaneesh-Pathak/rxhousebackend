@@ -642,6 +642,7 @@ app.get('/blog', (req, res) => {
 
 // Clean URL for single blog posts with SERVER-SIDE META INJECTION
 app.get("/blog/:slug", async (req, res) => {
+    console.log("SSR ROUTE HIT:", req.params.slug);
     try {
         const slug = req.params.slug;
 
