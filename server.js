@@ -640,6 +640,14 @@ app.get('/blog', (req, res) => {
     res.sendFile(blogHtmlPath);
 });
 
+app.get("/blog-post.html", (req, res) => {
+    if (!req.query.slug) {
+        return res.redirect("/blog");
+    }
+
+    return res.redirect(301, `/blog/${req.query.slug}`);
+});
+
 // Clean URL for single blog posts with SERVER-SIDE META INJECTION
 app.get("/blog/:slug", async (req, res) => {
     console.log("SSR ROUTE HIT:", req.params.slug);
