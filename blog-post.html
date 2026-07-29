@@ -19,7 +19,7 @@
 
     <meta id="og-image" property="og:image" content="{{BLOG_IMAGE}}">
     <meta id="og-image-secure" property="og:image:secure_url" content="{{BLOG_IMAGE}}">
-    <meta property="og:image:type" content="image/webp">
+    <meta property="og:image:type" content="image/png">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta property="og:locale" content="en_US">
@@ -529,7 +529,6 @@
             position: relative;
             width: 100%;
             padding-bottom: 56.25%;
-            /* 16:9 Aspect Ratio */
             height: 0;
             margin: 32px 0;
             border-radius: var(--radius-md);
@@ -659,74 +658,41 @@
             box-shadow: var(--shadow-sm);
         }
 
-        /* BLOG SHARE SECTION */
+        /* SINGLE SHARE BUTTON SECTION */
         .share-section {
-            margin-top: 50px;
-            padding-top: 30px;
+            margin-top: 40px;
+            padding-top: 24px;
             border-top: 1px solid var(--light);
-        }
-
-        .share-section h3 {
-            font-size: 20px;
-            margin-bottom: 18px;
-            color: var(--navy);
-        }
-
-        .share-buttons {
             display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
+            align-items: center;
+            justify-content: flex-end;
         }
 
-        .share-btn {
+        .share-btn-single {
             display: inline-flex;
             align-items: center;
-            justify-content: center;
-            gap: 8px;
-            padding: 10px 18px;
-            border-radius: 10px;
-            color: #fff;
-            font-weight: 700;
-            transition: var(--transition);
-            text-decoration: none;
+            gap: 10px;
+            padding: 10px 22px;
+            background: var(--teal);
+            color: var(--white);
             border: none;
+            border-radius: 100px;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
             cursor: pointer;
-            font-size: 14px;
+            transition: var(--transition);
             box-shadow: var(--shadow-sm);
         }
 
-        .share-btn:hover {
+        .share-btn-single:hover {
+            background: #0f766e;
             transform: translateY(-2px);
             box-shadow: var(--shadow-md);
-            color: #fff;
         }
 
-        .share-btn.primary {
-            background: var(--teal);
-        }
-
-        .share-btn.whatsapp {
-            background: #25D366;
-        }
-
-        .share-btn.telegram {
-            background: #229ED9;
-        }
-
-        .share-btn.facebook {
-            background: #1877F2;
-        }
-
-        .share-btn.linkedin {
-            background: #0A66C2;
-        }
-
-        .share-btn.twitter {
-            background: #000000;
-        }
-
-        .share-btn.copy-link {
-            background: var(--slate-dark);
+        .share-btn-single:active {
+            transform: translateY(0);
         }
 
         /* FOOTER LAYOUT */
@@ -926,15 +892,6 @@
                 line-height: 1.75;
             }
 
-            .share-buttons {
-                flex-direction: column;
-            }
-
-            .share-btn {
-                justify-content: center;
-                width: 100%;
-            }
-
             footer {
                 padding: 48px 16px 24px;
                 margin-top: 40px;
@@ -1046,7 +1003,7 @@
         <div class="mobile-nav-logo">
             <img src="/images/pdlogo.png" alt="Pharmacies Doctor Logo" class="mobile-logo-img">
         </div>
-        <a href="https://pharmacies.doctor/home.html" onclick="closeMobileMenu()">Home</a>
+        <a href="https://pharmacies.doctor/index.html" onclick="closeMobileMenu()">Home</a>
         <a href="https://pharmacies.doctor/about.html" onclick="closeMobileMenu()">About Us</a>
         <a href="https://pharmacies.doctor/pain-relief.html" onclick="closeMobileMenu()">Pain Relief</a>
         <a href="https://pharmacies.doctor/shop.html" onclick="closeMobileMenu()">Full Shop</a>
@@ -1069,11 +1026,11 @@
     <!-- MAIN NAVIGATION -->
     <nav>
         <div class="nav-inner">
-            <a class="logo" href="/home.html" aria-label="Pharmacies Doctor Home">
+            <a class="logo" href="https://pharmacies.doctor/index.html" aria-label="Pharmacies Doctor Home">
                 <img src="/images/pdlogo.png" alt="Pharmacies Doctor Logo" class="site-logo-img">
             </a>
             <div class="nav-links">
-                <a href="https://pharmacies.doctor/home.html">Home</a>
+                <a href="https://pharmacies.doctor/index.html">Home</a>
                 <a href="https://pharmacies.doctor/about.html">About Us</a>
                 <a href="https://pharmacies.doctor/pain-relief.html">Pain Relief</a>
                 <a href="https://pharmacies.doctor/shop.html">Shop</a>
@@ -1089,7 +1046,7 @@
     <!-- BACK BAR -->
     <div class="back-nav">
         <div class="container" style="max-width: 860px;">
-            <a href="/blog.html" class="back-link"><i class="fas fa-arrow-left"></i> Back to Blog</a>
+            <a href="https://pharmacies.doctor/blog.html" class="back-link"><i class="fas fa-arrow-left"></i> Back to Blog</a>
         </div>
     </div>
 
@@ -1115,32 +1072,11 @@
                     <p style="text-align: center; color: var(--slate); padding: 40px 0;">Loading post content...</p>
                 </div>
 
-                <!-- SHARE SECTION -->
+                <!-- SINGLE SHARE BUTTON SECTION -->
                 <div class="share-section">
-                    <h3>Share this article</h3>
-                    <div class="share-buttons">
-                        <button id="nativeShareBtn" class="share-btn primary" type="button">
-                            <i class="fas fa-share-alt"></i> Share
-                        </button>
-                        <a id="whatsappShare" class="share-btn whatsapp" target="_blank" rel="noopener noreferrer">
-                            <i class="fab fa-whatsapp"></i> WhatsApp
-                        </a>
-                        <a id="telegramShare" class="share-btn telegram" target="_blank" rel="noopener noreferrer">
-                            <i class="fab fa-telegram"></i> Telegram
-                        </a>
-                        <a id="facebookShare" class="share-btn facebook" target="_blank" rel="noopener noreferrer">
-                            <i class="fab fa-facebook-f"></i> Facebook
-                        </a>
-                        <a id="linkedinShare" class="share-btn linkedin" target="_blank" rel="noopener noreferrer">
-                            <i class="fab fa-linkedin-in"></i> LinkedIn
-                        </a>
-                        <a id="twitterShare" class="share-btn twitter" target="_blank" rel="noopener noreferrer">
-                            <i class="fab fa-x-twitter"></i> X
-                        </a>
-                        <button id="copyLinkBtn" class="share-btn copy-link" type="button">
-                            <i class="fas fa-link"></i> <span id="copyBtnText">Copy Link</span>
-                        </button>
-                    </div>
+                    <button id="shareBtn" class="share-btn-single" type="button" aria-label="Share article">
+                        <i class="fas fa-share-alt"></i> <span id="shareBtnText">Share Article</span>
+                    </button>
                 </div>
             </article>
         </div>
@@ -1185,7 +1121,7 @@
             </div>
             <div class="footer-col">
                 <h5>Quick Links</h5>
-                <a href="https://pharmacies.doctor/home.html">Home</a>
+                <a href="https://pharmacies.doctor/index.html">Home</a>
                 <a href="https://pharmacies.doctor/about.html">About Pharmacies Doctor</a>
                 <a href="https://pharmacies.doctor/shop.html">Shop All Meds</a>
                 <a href="https://pharmacies.doctor/contact.html">Contact Support</a>
@@ -1193,15 +1129,15 @@
             <div class="footer-col">
                 <h5>Legal & Policies</h5>
                 <a href="https://pharmacies.doctor/privacy-policy.html">Privacy Policy</a>
-                <a href="https://pharmacies.doctor/terms-of-service.html">Terms of Service</a>
+                <a href="https://pharmacies.doctor/terms.html">Terms of Service</a>
                 <a href="https://pharmacies.doctor/shipping-policy.html">Shipping Policy</a>
-                <a href="https://pharmacies.doctor/return-refund-policy.html">Return & Refund</a>
+                <a href="https://pharmacies.doctor/return-refund.html">Return & Refund</a>
                 <a href="https://pharmacies.doctor/hipaa-notice.html">HIPAA Notice</a>
             </div>
             <div class="footer-col">
-                <h5>Head Office</h5>
+                <h5>Head Office</h5>                                
                 <address>
-                    <p><i class="fas fa-user"></i> <span>Cara Wasilewski</span></p>
+                    <p><i class="fas fa-user"></i> <span>Cara Wasilewski</span></p>     
                     <p><i class="fas fa-map-marker-alt"></i> <span>10895 Pine View Heights Rd<br>Nevada City, CA
                             95959</span></p>
                     <p><i class="fas fa-envelope"></i> <span>onlinepharmacy@pharmacies.doctor</span></p>
@@ -1268,7 +1204,6 @@
 
         // UPDATE METADATA & OG TAGS DYNAMICALLY
         function updateMetaTags(blog, fullImageUrl) {
-
             const title = `${blog.title} | Pharmacies Doctor`;
 
             const description = (blog.excerpt || blog.description || blog.content || '')
@@ -1278,47 +1213,21 @@
 
             const currentUrl = window.location.href;
 
-            // Update page title
             document.title = title;
             document.getElementById("og-image-secure").setAttribute("content", fullImageUrl);
             document.getElementById("twitter-url").setAttribute("content", currentUrl);
 
-            // Description
-            document.querySelector('meta[name="description"]')
-                ?.setAttribute("content", description);
-
-            // Canonical
-            document.querySelector('link[rel="canonical"]')
-                ?.setAttribute("href", currentUrl);
-
-            // Open Graph
-            document.querySelector('meta[property="og:title"]')
-                ?.setAttribute("content", title);
-
-            document.querySelector('meta[property="og:description"]')
-                ?.setAttribute("content", description);
-
-            document.querySelector('meta[property="og:image"]')
-                ?.setAttribute("content", fullImageUrl);
-
-            document.querySelector('meta[property="og:image:secure_url"]')
-                ?.setAttribute("content", fullImageUrl);
-
-            document.querySelector('meta[property="og:url"]')
-                ?.setAttribute("content", currentUrl);
-
-            // Twitter
-            document.querySelector('meta[name="twitter:title"]')
-                ?.setAttribute("content", title);
-
-            document.querySelector('meta[name="twitter:description"]')
-                ?.setAttribute("content", description);
-
-            document.querySelector('meta[name="twitter:image"]')
-                ?.setAttribute("content", fullImageUrl);
-
-            document.querySelector('meta[name="twitter:url"]')
-                ?.setAttribute("content", currentUrl);
+            document.querySelector('meta[name="description"]')?.setAttribute("content", description);
+            document.querySelector('link[rel="canonical"]')?.setAttribute("href", currentUrl);
+            document.querySelector('meta[property="og:title"]')?.setAttribute("content", title);
+            document.querySelector('meta[property="og:description"]')?.setAttribute("content", description);
+            document.querySelector('meta[property="og:image"]')?.setAttribute("content", fullImageUrl);
+            document.querySelector('meta[property="og:image:secure_url"]')?.setAttribute("content", fullImageUrl);
+            document.querySelector('meta[property="og:url"]')?.setAttribute("content", currentUrl);
+            document.querySelector('meta[name="twitter:title"]')?.setAttribute("content", title);
+            document.querySelector('meta[name="twitter:description"]')?.setAttribute("content", description);
+            document.querySelector('meta[name="twitter:image"]')?.setAttribute("content", fullImageUrl);
+            document.querySelector('meta[name="twitter:url"]')?.setAttribute("content", currentUrl);
         }
 
         // FETCH BLOG ARTICLE
@@ -1356,10 +1265,8 @@
 
                 const blog = await response.json();
 
-                // Resolve Image URL for standard image vs YouTube video vs default fallback
                 let resolvedOgImage = `${window.location.origin}/images/pdlogo.png`;
 
-                // Populate Metadata & Titles
                 document.getElementById("post-title").innerText = blog.title;
                 document.getElementById("post-category").innerText = blog.category || 'General';
                 document.getElementById("post-author").innerText = `By ${blog.author || 'Pharmacies Doctor'}`;
@@ -1371,7 +1278,6 @@
                     day: 'numeric'
                 }) : 'Recently Published';
 
-                // Populate Featured Image / Video
                 if (blog.featured_image) {
                     const mediaContainer = document.getElementById("post-image-container");
                     const youtubeId = getYouTubeId(blog.featured_image);
@@ -1410,15 +1316,12 @@
                     }
                 }
 
-                // Update Dynamic Head Tags
                 updateMetaTags(blog, resolvedOgImage);
 
-                // Populate Content Body & Wrap Embeds
                 const postContent = document.getElementById("post-content");
                 postContent.innerHTML = blog.content;
 
-                // Setup Share Buttons
-                setupShareButtons(blog);
+                setupShareButton(blog);
 
                 const iframes = postContent.querySelectorAll("iframe");
                 iframes.forEach(iframe => {
@@ -1444,25 +1347,17 @@
             document.getElementById("post-content").innerHTML = `<p class="error-msg" style="color:#dc3545; text-align:center; padding: 40px 0; font-weight: 600;">${message}</p>`;
         }
 
-        // SHARE BUTTON SETUP
-        function setupShareButtons(blog) {
-            const url = window.location.href;
-            const title = blog.title || document.title;
-            const text = (blog.excerpt || blog.description || title).replace(/<[^>]*>?/gm, '').substring(0, 150);
+        // SINGLE SHARE BUTTON SETUP
+        function setupShareButton(blog) {
+            const shareBtn = document.getElementById("shareBtn");
+            const shareBtnText = document.getElementById("shareBtnText");
+            if (!shareBtn) return;
 
-            const encodedURL = encodeURIComponent(url);
-            const encodedTitle = encodeURIComponent(title);
-            const encodedText = encodeURIComponent(text);
+            shareBtn.onclick = async () => {
+                const url = window.location.href;
+                const title = blog.title || document.title;
+                const text = (blog.excerpt || blog.description || title).replace(/<[^>]*>?/gm, '').substring(0, 150);
 
-            // Social Links
-            document.getElementById("whatsappShare").href = `https://api.whatsapp.com/send?text=${encodedTitle}%20${encodedURL}`;
-            document.getElementById("telegramShare").href = `https://t.me/share/url?url=${encodedURL}&text=${encodedTitle}`;
-            document.getElementById("facebookShare").href = `https://www.facebook.com/sharer/sharer.php?u=${encodedURL}`;
-            document.getElementById("linkedinShare").href = `https://www.linkedin.com/sharing/share-offsite/?url=${encodedURL}`;
-            document.getElementById("twitterShare").href = `https://x.com/intent/post?text=${encodedTitle}&url=${encodedURL}`;
-
-            // Native Web Share API
-            document.getElementById("nativeShareBtn").onclick = async () => {
                 if (navigator.share) {
                     try {
                         await navigator.share({
@@ -1471,31 +1366,20 @@
                             url: url
                         });
                     } catch (e) {
-                        console.log('Share canceled or failed', e);
+                        console.log('Share canceled', e);
                     }
                 } else {
-                    copyUrlToClipboard();
+                    navigator.clipboard.writeText(url).then(() => {
+                        const originalText = shareBtnText.innerText;
+                        shareBtnText.innerText = "Link Copied!";
+                        setTimeout(() => {
+                            shareBtnText.innerText = originalText;
+                        }, 2500);
+                    }).catch(() => {
+                        alert("Blog link: " + url);
+                    });
                 }
             };
-
-            // Copy Link Button
-            document.getElementById("copyLinkBtn").onclick = () => {
-                copyUrlToClipboard();
-            };
-        }
-
-        function copyUrlToClipboard() {
-            const url = window.location.href;
-            navigator.clipboard.writeText(url).then(() => {
-                const btnText = document.getElementById("copyBtnText");
-                const originalText = btnText.innerText;
-                btnText.innerText = "Copied!";
-                setTimeout(() => {
-                    btnText.innerText = originalText;
-                }, 2500);
-            }).catch(err => {
-                alert("Blog link copied successfully: " + url);
-            });
         }
     </script>
 </body>

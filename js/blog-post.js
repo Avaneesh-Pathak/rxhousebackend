@@ -12,7 +12,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (parts.length >= 2 && parts[0] === "blog") {
             slug = parts[1];
         }
-    }
+    }   
 
     if (!slug) {
         window.location.href = "/blog";
