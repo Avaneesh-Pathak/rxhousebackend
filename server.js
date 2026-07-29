@@ -28,7 +28,9 @@ app.use(cors({
 
 // Must be set to allow larger JSON image payloads
 app.use(express.json({ limit: '10mb' }));
-
+app.use("/css", express.static(path.join(__dirname, "css")));
+app.use("/js", express.static(path.join(__dirname, "js")));
+app.use("/images", express.static(path.join(__dirname, "images")));
 app.use((req, res, next) => {
     console.log(`${req.method} ${req.url}`);
     console.log('Origin:', req.headers.origin);

@@ -1,0 +1,60 @@
+.pain-hero {
+    background: linear-gradient(135deg, #1e3a5f 0%, #0a1628 100%);
+    padding: 70px 32px;
+    border-bottom: 3px solid var(--teal)
+}
+
+.pain-hero .container {
+    display: flex;
+    align-items: center;
+    gap: 60px
+}
+
+.pain-hero-text {
+    flex: 1
+}
+
+.pain-hero h1 {
+    font-size: 46px;
+    color: white;
+    letter-spacing: -.03em;
+    margin: 12px 0
+}
+
+.pain-hero p {
+    color: rgba(255, 255, 255, .65);
+    font-size: 15px;
+    line-height: 1.7;
+    max-width: 500px
+}
+
+.pain-hero-visual {
+    flex-shrink: 0;
+    width: 220px;
+    height: 220px;
+    background: rgba(13, 148, 136, .15);
+    border: 2px solid rgba(13, 148, 136, .3);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 80px;
+    color: var(--teal-light)
+}
+
+@media (max-width:768px) {
+    .pain-hero .container {
+        flex-direction: column;
+        text-align: center
+    }
+
+    .pain-hero h1 {
+        font-size: 34px
+    }
+
+    .pain-hero-visual {
+        width: 140px;
+        height: 140px;
+        font-size: 50px
+    }
+}
