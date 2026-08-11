@@ -11,7 +11,21 @@ if (process.env.NODE_ENV !== "production") {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const FRONTEND_DIR = path.resolve(__dirname, "../medicine");
 
+console.log("=================================");
+console.log("FRONTEND DIRECTORY:", FRONTEND_DIR);
+console.log("BLOG TEMPLATE:");
+console.log(
+    path.join(FRONTEND_DIR, "blog-post.html")
+);
+console.log(
+    "BLOG TEMPLATE EXISTS:",
+    fs.existsSync(
+        path.join(FRONTEND_DIR, "blog-post.html")
+    )
+);
+console.log("=================================");
 app.use(cors({
     origin: [
         "http://localhost:5500",
@@ -28,9 +42,20 @@ app.use(cors({
 
 // Must be set to allow larger JSON image payloads
 app.use(express.json({ limit: '10mb' }));
-app.use("/css", express.static(path.join(__dirname, "css")));
-app.use("/js", express.static(path.join(__dirname, "js")));
-app.use("/images", express.static(path.join(__dirname, "images")));
+app.use(
+    "/css",
+    express.static(path.join(FRONTEND_DIR, "css"))
+);
+
+app.use(
+    "/js",
+    express.static(path.join(FRONTEND_DIR, "js"))
+);
+
+app.use(
+    "/images",
+    express.static(path.join(FRONTEND_DIR, "images"))
+);
 app.use((req, res, next) => {
     console.log(`${req.method} ${req.url}`);
     console.log('Origin:', req.headers.origin);
@@ -545,7 +570,6 @@ app.delete("/api/contact", async (req, res) => {
 });
 
 // NATIVE BASE64 IMAGE FILE SAVING
-app.use('/images', express.static(path.join(__dirname, 'images')));
 
 app.post('/api/upload-base64', (req, res) => {
     const { image } = req.body;
@@ -601,11 +625,10 @@ function readTemplateCached(filePath) {
 }
 
 function resolveBlogPostTemplatePath() {
-    let templatePath = path.join(__dirname, 'blog-post.html');
-    if (!fs.existsSync(templatePath)) {
-        templatePath = path.join(__dirname, '../public_html/blog-post.html');
-    }
-    return templatePath;
+    return path.join(
+        FRONTEND_DIR,
+        "blog-post.html"
+    );
 }
 
 // IMPORTANT: This redirect must be registered BEFORE express.static(__dirname)
@@ -642,84 +665,197 @@ app.get('/blog', (req, res) => {
     res.sendFile(blogHtmlPath);
 });
 
-app.get("/blog-post.html", (req, res) => {
-    if (!req.query.slug) {
-        return res.redirect("/blog");
-    }
+app.get("/debug-blog", (req, res) => {
+    console.log("DEBUG BLOG ROUTE HIT");
+    console.log("DIRNAME:", __dirname);
 
-    return res.redirect(301, `/blog/${req.query.slug}`);
+    const templatePath = path.resolve(
+        __dirname,
+        "../medicine/blog-post.html"
+    );
+
+    console.log("TEMPLATE:", templatePath);
+    console.log("EXISTS:", fs.existsSync(templatePath));
+
+    res.json({
+        success: true,
+        dirname: __dirname,
+        template: templatePath,
+        exists: fs.existsSync(templatePath)
+    });
 });
-
 // Clean URL for single blog posts with SERVER-SIDE META INJECTION
 app.get("/blog/:slug", async (req, res) => {
-    console.log("SSR ROUTE HIT:", req.params.slug);
+
+    console.log("=================================");
+    console.log("BLOG SSR ROUTE HIT");
+    console.log("Slug:", req.params.slug);
+    console.log("=================================");
+
     try {
+
         const slug = req.params.slug;
 
         const { rows } = await pool.query(
-            "SELECT * FROM blogs WHERE slug=$1 AND is_published=true LIMIT 1",
+            `
+            SELECT *
+            FROM blogs
+            WHERE slug = $1
+              AND is_published = true
+            LIMIT 1
+            `,
             [slug]
         );
 
+        console.log("Database result:", rows.length);
+
         if (!rows.length) {
-            return res.status(404).send("Blog post not found");
+            return res.status(404).send(
+                "Blog post not found"
+            );
         }
 
         const blog = rows[0];
-        const siteUrl = "https://pharmacies.doctor";
 
-        // Determine correct template file location
-        const templatePath = resolveBlogPostTemplatePath();
+        const templatePath =
+            resolveBlogPostTemplatePath();
+
+        console.log(
+            "Template:",
+            templatePath
+        );
+
+        console.log(
+            "Template exists:",
+            fs.existsSync(templatePath)
+        );
 
         if (!fs.existsSync(templatePath)) {
-            return res.status(500).send("Blog post HTML template not found on server.");
+            return res.status(500).send(
+                "Blog post HTML template not found on server."
+            );
         }
 
-        let html = readTemplateCached(templatePath);
+        let html =
+            readTemplateCached(templatePath);
 
-        // Format Image URL for OG/Twitter Cards
-        const imageBase = "https://pd.pharmacies.doctor";
+        // ----------------------------------
+        // MAIN DOMAIN
+        // ----------------------------------
 
-        let image = `${imageBase}/images/pdlogo.png`;
+        const siteUrl =
+            "https://pharmacies.doctor";
+
+        const imageBase =
+            "https://pharmacies.doctor";
+
+        // ----------------------------------
+        // IMAGE
+        // ----------------------------------
+
+        let image =
+            `${imageBase}/images/pdlogo.png`;
 
         if (blog.featured_image) {
 
-            const youtubeId = getYouTubeId(blog.featured_image);
+            const youtubeId =
+                getYouTubeId(
+                    blog.featured_image
+                );
 
             if (youtubeId) {
-                image = `https://img.youtube.com/vi/${youtubeId}/maxresdefault.jpg`;
-            }
-            else if (blog.featured_image.startsWith("http")) {
-                image = blog.featured_image;
-            }
-            else {
-                image = `${imageBase}/${blog.featured_image.replace(/^\/+/, "")}`;
+
+                image =
+                    `https://img.youtube.com/vi/${youtubeId}/maxresdefault.jpg`;
+
+            } else if (
+                blog.featured_image.startsWith("http")
+            ) {
+
+                image =
+                    blog.featured_image;
+
+            } else {
+
+                image =
+                    `${imageBase}/${blog.featured_image.replace(/^\/+/, "")}`;
             }
         }
 
-        // Sanitize strings for safe HTML attribute replacement
-        const safeTitle = (blog.title || "Pharmacies Doctor Blog").replace(/"/g, '&quot;');
-        const safeDescription = (blog.excerpt || blog.description || blog.content || '')
-            .replace(/<[^>]*>?/gm, '')
-            .replace(/"/g, '&quot;')
+        // ----------------------------------
+        // SEO DATA
+        // ----------------------------------
+
+        const safeTitle =
+            (blog.title ||
+                "Pharmacies Doctor Blog")
+            .replace(/"/g, "&quot;");
+
+        const safeDescription =
+            (
+                blog.excerpt ||
+                blog.description ||
+                blog.content ||
+                ""
+            )
+            .replace(/<[^>]*>/g, "")
+            .replace(/"/g, "&quot;")
             .substring(0, 160)
             .trim();
 
-        const canonicalUrl = `${siteUrl}/blog/${blog.slug}`;
+        const canonicalUrl =
+            `${siteUrl}/blog/${blog.slug}`;
 
-        // Template Tag Replacements
-        html = html.replace(/{{BLOG_TITLE}}/g, safeTitle);
-        html = html.replace(/{{BLOG_DESCRIPTION}}/g, safeDescription);
-        html = html.replace(/{{BLOG_URL}}/g, canonicalUrl);
-        html = html.replace(/{{BLOG_IMAGE}}/g, image);
+        // ----------------------------------
+        // REPLACE TEMPLATE VARIABLES
+        // ----------------------------------
 
-        res.setHeader('Content-Type', 'text/html');
-        res.setHeader('Cache-Control', 'no-cache');
+        html = html.replace(
+            /{{BLOG_TITLE}}/g,
+            safeTitle
+        );
+
+        html = html.replace(
+            /{{BLOG_DESCRIPTION}}/g,
+            safeDescription
+        );
+
+        html = html.replace(
+            /{{BLOG_URL}}/g,
+            canonicalUrl
+        );
+
+        html = html.replace(
+            /{{BLOG_IMAGE}}/g,
+            image
+        );
+
+        // ----------------------------------
+        // RESPONSE
+        // ----------------------------------
+
+        res.setHeader(
+            "Content-Type",
+            "text/html; charset=utf-8"
+        );
+
+        res.setHeader(
+            "Cache-Control",
+            "no-cache, no-store, must-revalidate"
+        );
+
         res.send(html);
 
     } catch (err) {
-        console.error("Error serving blog post with SSR meta:", err);
-        res.status(500).send("Server Error serving blog post.");
+
+        console.error(
+            "BLOG SSR ERROR:",
+            err
+        );
+
+        res.status(500).send(
+            "Server Error serving blog post."
+        );
     }
 });
 
@@ -742,37 +878,3 @@ app.get('/', (req, res) => {
         process.exit(1); 
     }
 })();
-
-
-// fetch("https://pd.pharmacies.doctor/api/orders", {
-//     method: "DELETE"
-// })
-// .then(res => res.json())
-// .then(data => {
-//     console.log("Orders deleted:", data);
-// })
-// .catch(console.error);
-// Delete all social clicks
-// fetch("https://pd.pharmacies.doctor/api/social-clicks", {
-//     method: "DELETE"
-// })
-// .then(res => res.json())
-// .then(data => {
-//     console.log("Social clicks deleted:", data);
-// })
-// .catch(console.error);
-// Delete both at once
-// Promise.all([
-//     fetch("https://pd.pharmacies.doctor/api/orders", {
-//         method: "DELETE"
-//     }).then(r => r.json()),
-
-//     fetch("https://pd.pharmacies.doctor/api/social-clicks", {
-//         method: "DELETE"
-//     }).then(r => r.json())
-// ])
-// .then(results => {
-//     console.log("Done:", results);
-//     alert("All orders and social clicks deleted.");
-// })
-// .catch(console.error);

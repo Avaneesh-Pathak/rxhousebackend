@@ -17,8 +17,10 @@ pnpm-debug.log*
 # ==========================
 # Uploaded Images
 # ==========================
-images/
+# User uploaded images
+images/*
 !images/.gitkeep
+!images/pdlogo.png
 
 # ==========================
 # Logs
