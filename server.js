@@ -63,6 +63,14 @@ const transporter = nodemailer.createTransport({
     logger: true,
     debug: true,
 });
+transporter.verify((error) => {
+    if (error) {
+        console.error("SMTP VERIFICATION FAILED:");
+        console.error(error);
+    } else {
+        console.log("SMTP SERVER READY");
+    }
+});
 function escapeHtml(text) {
     if (!text) return "";
     return String(text)
@@ -182,7 +190,322 @@ app.get("/api/products", async (req, res) => {
         res.status(500).json({ error: "Unable to fetch products" });
     }
 });
+// ------------------------------------------------------------
+// ORDER APIs
+// ------------------------------------------------------------
 
+// GET /api/orders
+app.get("/api/orders", async (req, res) => {
+    try {
+        const { rows } = await pool.query(`
+            SELECT
+                id,
+                billing,
+                itemCount,
+                subtotal,
+                shipping,
+                tax,
+                total,
+                date
+            FROM orders
+            ORDER BY date DESC
+        `);
+
+        const orderIds = rows.map(order => order.id);
+
+        if (orderIds.length === 0) {
+            return res.json([]);
+        }
+
+        const { rows: itemRows } = await pool.query(`
+            SELECT
+                order_id,
+                name,
+                "pillqty",
+                "lineprice"
+            FROM order_items
+            WHERE order_id = ANY($1::text[])
+            ORDER BY id
+        `, [orderIds]);
+
+        const itemsByOrder = {};
+
+        for (const item of itemRows) {
+            if (!itemsByOrder[item.order_id]) {
+                itemsByOrder[item.order_id] = [];
+            }
+
+            itemsByOrder[item.order_id].push({
+                name: item.name,
+                pillQty: item.pillqty,
+                linePrice: Number(item.lineprice)
+            });
+        }
+
+        const result = rows.map(order => ({
+            ...order,
+            subtotal: Number(order.subtotal),
+            shipping: Number(order.shipping),
+            tax: Number(order.tax),
+            total: Number(order.total),
+            items: itemsByOrder[order.id] || []
+        }));
+
+        return res.json(result);
+
+    } catch (err) {
+        console.error("GET ORDERS ERROR:", err);
+
+        return res.status(500).json({
+            error: "Unable to fetch orders",
+            detail: err.message
+        });
+    }
+});
+
+
+// POST /api/orders
+app.post("/api/orders", async (req, res) => {
+    const client = await pool.connect();
+
+    try {
+        const order = req.body;
+
+        if (!order || !order.id) {
+            return res.status(400).json({
+                error: "Invalid order data",
+                detail: "Order ID is required"
+            });
+        }
+
+        if (!order.billing) {
+            return res.status(400).json({
+                error: "Invalid order data",
+                detail: "Billing information is required"
+            });
+        }
+
+        if (!Array.isArray(order.items) || order.items.length === 0) {
+            return res.status(400).json({
+                error: "Invalid order data",
+                detail: "Order must contain at least one item"
+            });
+        }
+
+        await client.query("BEGIN");
+
+        // ----------------------------------------------------
+        // SAVE ORDER
+        // ----------------------------------------------------
+
+        await client.query(
+            `
+            INSERT INTO orders (
+                id,
+                billing,
+                itemCount,
+                subtotal,
+                shipping,
+                tax,
+                total,
+                date
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (id)
+            DO UPDATE SET
+                billing = EXCLUDED.billing,
+                itemCount = EXCLUDED.itemCount,
+                subtotal = EXCLUDED.subtotal,
+                shipping = EXCLUDED.shipping,
+                tax = EXCLUDED.tax,
+                total = EXCLUDED.total,
+                date = EXCLUDED.date
+            `,
+            [
+                String(order.id),
+                JSON.stringify(order.billing),
+                Number(order.itemCount || order.items.length),
+                Number(order.subtotal || 0),
+                Number(order.shipping || 0),
+                Number(order.tax || 0),
+                Number(order.total || 0),
+                order.date || new Date().toISOString()
+            ]
+        );
+
+        // ----------------------------------------------------
+        // REMOVE OLD ITEMS WHEN UPDATING AN EXISTING ORDER
+        // ----------------------------------------------------
+
+        await client.query(
+            `DELETE FROM order_items WHERE order_id = $1`,
+            [String(order.id)]
+        );
+
+        // ----------------------------------------------------
+        // SAVE ORDER ITEMS
+        // ----------------------------------------------------
+
+        for (const item of order.items) {
+            await client.query(
+                `
+                INSERT INTO order_items (
+                    order_id,
+                    name,
+                    pillQty,
+                    linePrice
+                )
+                VALUES ($1, $2, $3, $4)
+                `,
+                [
+                    String(order.id),
+                    String(item.name || ""),
+                    Number(item.pillQty || item.qty || 0),
+                    Number(item.linePrice || item.price || 0)
+                ]
+            );
+        }
+
+        await client.query("COMMIT");
+
+        // ----------------------------------------------------
+        // EMAIL
+        // ----------------------------------------------------
+
+        const billing = order.billing || {};
+
+        const itemHtml = order.items
+            .map(item => `
+                <tr>
+                    <td style="padding:8px;border-bottom:1px solid #ddd;">
+                        ${escapeHtml(item.name)}
+                    </td>
+                    <td style="padding:8px;border-bottom:1px solid #ddd;text-align:center;">
+                        ${Number(item.pillQty || item.qty || 0)}
+                    </td>
+                    <td style="padding:8px;border-bottom:1px solid #ddd;text-align:right;">
+                        $${Number(item.linePrice || item.price || 0).toFixed(2)}
+                    </td>
+                </tr>
+            `)
+            .join("");
+
+        const customerName =
+            `${billing.firstName || ""} ${billing.lastName || ""}`.trim();
+
+        const emailHtml = `
+            <div style="font-family:Arial,sans-serif;max-width:700px;margin:auto;">
+                <h2>New Order #${escapeHtml(order.id)}</h2>
+
+                <h3>Customer Information</h3>
+
+                <p>
+                    <strong>Name:</strong>
+                    ${escapeHtml(customerName || billing.firstName || "")}
+                </p>
+
+                <p>
+                    <strong>Email:</strong>
+                    ${escapeHtml(billing.email || "")}
+                </p>
+
+                <p>
+                    <strong>Phone:</strong>
+                    ${escapeHtml(billing.phone || "")}
+                </p>
+
+                <p>
+                    <strong>Address:</strong><br>
+                    ${escapeHtml(billing.street || "")}<br>
+                    ${escapeHtml(billing.city || "")},
+                    ${escapeHtml(billing.state || "")}
+                    ${escapeHtml(billing.zip || "")}
+                </p>
+
+                <h3>Order Items</h3>
+
+                <table
+                    width="100%"
+                    cellspacing="0"
+                    cellpadding="0"
+                    style="border-collapse:collapse;"
+                >
+                    <thead>
+                        <tr>
+                            <th style="padding:8px;text-align:left;border-bottom:2px solid #111;">
+                                Product
+                            </th>
+                            <th style="padding:8px;text-align:center;border-bottom:2px solid #111;">
+                                Qty
+                            </th>
+                            <th style="padding:8px;text-align:right;border-bottom:2px solid #111;">
+                                Price
+                            </th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        ${itemHtml}
+                    </tbody>
+                </table>
+
+                <h3>Order Summary</h3>
+
+                <p>
+                    <strong>Subtotal:</strong>
+                    $${Number(order.subtotal || 0).toFixed(2)}
+                </p>
+
+                <p>
+                    <strong>Shipping:</strong>
+                    $${Number(order.shipping || 0).toFixed(2)}
+                </p>
+
+                <p>
+                    <strong>Tax:</strong>
+                    $${Number(order.tax || 0).toFixed(2)}
+                </p>
+
+                <p style="font-size:18px;">
+                    <strong>Total:</strong>
+                    $${Number(order.total || 0).toFixed(2)}
+                </p>
+            </div>
+        `;
+
+        await transporter.sendMail({
+            from: `"USA MediHub Orders" <${process.env.SMTP_USER}>`,
+            to: process.env.EMAIL_TO || process.env.SMTP_USER,
+            replyTo: billing.email || process.env.SMTP_USER,
+            subject: `New Order #${order.id}`,
+            html: emailHtml
+        });
+
+        return res.status(201).json({
+            success: true,
+            message: "Order saved successfully",
+            orderId: order.id
+        });
+
+    } catch (err) {
+
+        try {
+            await client.query("ROLLBACK");
+        } catch (rollbackError) {
+            console.error("ROLLBACK ERROR:", rollbackError);
+        }
+
+        console.error("ORDER ERROR:", err);
+
+        return res.status(500).json({
+            error: "Unable to save order",
+            detail: err.message
+        });
+
+    } finally {
+        client.release();
+    }
+});
 app.get("/api/blogs", async (req, res) => {
     try {
         const { rows } = await pool.query(`
