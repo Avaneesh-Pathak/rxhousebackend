@@ -1,5 +1,13 @@
+# Uploaded images - NEVER commit to GitHub
+/images/
+
+# Dependencies
 node_modules/
+
+# Environment variables
 .env
 .env.*
 !.env.example
+
+# Logs
 *.log

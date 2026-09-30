@@ -12,6 +12,17 @@
 
     <link id="canonical-url" rel="canonical" href="{{BLOG_URL}}">
 
+    <script type="application/ld+json" id="blog-jsonld-static">{
+        "@context":"https://schema.org",
+        "@type":"Article",
+        "headline":"{{BLOG_TITLE}}",
+        "description":"{{BLOG_DESCRIPTION}}",
+        "mainEntityOfPage":{"@type":"WebPage","@id":"{{BLOG_URL}}"},
+        "image":["{{BLOG_IMAGE}}"],
+        "author":{"@type":"Organization","name":"Pharmacies Doctor"},
+        "publisher":{"@type":"Organization","name":"Pharmacies Doctor","url":"https://pharmacies.doctor"}
+    }</script>
+
     <!-- Open Graph -->
     <meta property="og:type" content="article">
     <meta property="og:site_name" content="Pharmacies Doctor">

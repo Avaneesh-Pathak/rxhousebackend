@@ -24,6 +24,14 @@ const BACKEND_URL =
     process.env.BACKEND_URL ||
     "https://pd.pharmacies.doctor";
 
+// Keep uploaded media outside the Git checkout in production when possible.
+// Example: set UPLOAD_DIR to a persistent Hostinger directory.
+const UPLOAD_DIR =
+    process.env.UPLOAD_DIR ||
+    path.join(__dirname, "images");
+
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
 /*
  * IMPORTANT:
  * The public website is pharmacies.doctor.
@@ -133,7 +141,15 @@ app.use(
 
 app.use(
     "/images",
-    express.static(path.join(__dirname, "images"))
+    express.static(UPLOAD_DIR, {
+        maxAge: "30d",
+        etag: true,
+        lastModified: true,
+        immutable: true,
+        setHeaders: (res) => {
+            res.setHeader("Cache-Control", "public, max-age=2592000, immutable");
+        }
+    })
 );
 
 // ============================================================
@@ -1216,72 +1232,69 @@ app.delete(
 // PUBLIC BLOG API
 // ============================================================
 
-app.get(
-    "/api/blogs",
-    async (req, res) => {
-        try {
-            const { rows } =
-                await pool.query(
-                    `
-                    SELECT
-                        id,
-                        title,
-                        slug,
-                        excerpt,
-                        featured_image,
-                        category,
-                        author,
-                        created_at
-                    FROM blogs
-                    WHERE is_published = true
-                    ORDER BY created_at DESC
-                    `
-                );
-
-            res.json(rows);
-        } catch (err) {
-            console.error(err);
-
-            res.status(500).json({
-                error:
-                    "Unable to fetch blogs",
-            });
-        }
-    }
-);
+// The public blog list is cached briefly so repeat visits do not wait for a
+// fresh database request before the browser can render cached image URLs.
 
 // ============================================================
 // SINGLE BLOG API
 // ============================================================
 
 app.get(
-    "/api/blogs/:slug",
+    "/api/blogs",
     async (req, res) => {
         try {
-            const { rows } =
-                await pool.query(
-                    `
-                    SELECT *
-                    FROM blogs
-                    WHERE slug = $1
-                    `,
-                    [req.params.slug]
-                );
+            const { rows } = await pool.query(`
+                SELECT
+                    id,
+                    title,
+                    slug,
+                    excerpt,
+                    featured_image,
+                    category,
+                    author,
+                    created_at,
+                    updated_at
+                FROM blogs
+                WHERE is_published = true
+                ORDER BY created_at DESC
+            `);
 
-            if (!rows.length) {
-                return res.status(404).json({
-                    error:
-                        "Blog not found",
-                });
-            }
+            res.set({
+                "Cache-Control": "public, max-age=60, stale-while-revalidate=300"
+            });
 
-            res.json(rows[0]);
+            res.json(rows);
         } catch (err) {
             console.error(err);
 
             res.status(500).json({
-                error: "Server Error",
+                error: "Unable to fetch blogs"
             });
+        }
+    }
+);
+
+app.get(
+    "/api/blogs/:slug",
+    async (req, res) => {
+        try {
+            const { rows } = await pool.query(
+                `SELECT id, title, slug, excerpt, content, featured_image, category, author, tags, created_at, updated_at
+                 FROM blogs
+                 WHERE slug = $1 AND is_published = true
+                 LIMIT 1`,
+                [req.params.slug]
+            );
+
+            if (!rows.length) {
+                return res.status(404).json({ error: "Blog post not found" });
+            }
+
+            res.set("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
+            res.json(rows[0]);
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({ error: "Unable to fetch blog post" });
         }
     }
 );
@@ -1839,11 +1852,7 @@ app.post(
         }
 
         try {
-            const imagesDir =
-                path.join(
-                    __dirname,
-                    "images"
-                );
+            const imagesDir = UPLOAD_DIR;
 
             if (
                 !fs.existsSync(
@@ -2183,7 +2192,7 @@ app.get(
             // ------------------------------------------------
 
             let image =
-                `${imageBase}/images/pdlogo.png`;
+                `${SITE_URL}/images/og-image.jpg`;
 
             if (
                 blog.featured_image
@@ -2207,7 +2216,7 @@ app.get(
                         blog.featured_image;
                 } else {
                     image =
-                        `${imageBase}/${String(
+                        `${BACKEND_URL}/${String(
                             blog.featured_image
                         ).replace(
                             /^\/+/,
