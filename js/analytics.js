@@ -7,7 +7,7 @@
   'use strict';
 
   const MEASUREMENT_ID = 'G-8ZC6ZKH2S9';
-  const GTM_CONTAINER_ID = ''; // REQUIRED for GTM: e.g. GTM-XXXXXXX
+  const GTM_CONTAINER_ID = 'GTM-PDH24ZBC'; // REQUIRED for GTM: e.g. GTM-XXXXXXX
   const CURRENCY = 'USD';
   const dataLayer = window.dataLayer = window.dataLayer || [];
 
