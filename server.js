@@ -2521,17 +2521,30 @@ app.use(
 // START SERVER
 // ============================================================
 
+// ============================================================
+// START SERVER
+// ============================================================
+
 async function initializeDatabase() {
     if (databaseInitializing || databaseReady || shuttingDown) return;
+
     databaseInitializing = true;
+
     try {
         await createTables();
         await seedProductsIfEmpty();
+
         databaseReady = true;
+
         console.log("Database initialized; API data routes are ready.");
     } catch (error) {
         databaseReady = false;
-        console.error("Database initialization failed. Check DATABASE_URL, database permissions and connectivity.", error.code || "DATABASE_ERROR");
+
+        console.error(
+            "Database initialization failed. Check DATABASE_URL, database permissions and connectivity.",
+            error.code || "DATABASE_ERROR"
+        );
+
         if (!shuttingDown) {
             databaseRetryTimer = setTimeout(initializeDatabase, 10000);
             databaseRetryTimer.unref();
@@ -2543,29 +2556,60 @@ async function initializeDatabase() {
 
 function startServer() {
     const server = app.listen(PORT, HOST, () => {
-        console.log(`Pharmacies Doctor API listening on ${HOST}:${server.address().port}`);
-        console.log("GET /health checks the process; GET /health/ready checks the database.");
+        console.log(
+            `Pharmacies Doctor API listening on ${HOST}:${server.address().port}`
+        );
+
+        console.log(
+            "GET /health checks the process; GET /health/ready checks the database."
+        );
+
         initializeDatabase();
     });
+
     server.on("error", error => {
-        console.error("HTTP server failed to start:", error.code || "LISTEN_ERROR");
+        console.error(
+            "HTTP server failed to start:",
+            error.code || "LISTEN_ERROR"
+        );
+
         process.exitCode = 1;
     });
+
     const shutdown = signal => {
         if (shuttingDown) return;
+
         shuttingDown = true;
-        console.log(`${signal} received. Shutting down gracefully...`);
+
+        console.log(
+            `${signal} received. Shutting down gracefully...`
+        );
+
         clearTimeout(databaseRetryTimer);
+
         server.close(async () => {
-            try { await pool.end(); }
-            finally { process.exit(0); }
+            try {
+                await pool.end();
+            } finally {
+                process.exit(0);
+            }
         });
+
         setTimeout(() => process.exit(1), 15000).unref();
     };
+
     process.once("SIGTERM", () => shutdown("SIGTERM"));
     process.once("SIGINT", () => shutdown("SIGINT"));
+
     return server;
 }
 
-if (require.main === module) startServer();
-module.exports = { app, startServer, pool };
+// Hostinger Node.js hosting requires the application to listen
+// immediately when the entry file is loaded.
+startServer();
+
+module.exports = {
+    app,
+    startServer,
+    pool
+};
