@@ -981,7 +981,7 @@
     <aside class="mobile-nav" id="mobileNav" aria-hidden="true">
         <button class="mobile-nav-close" onclick="closeMobileMenu()" aria-label="Close menu">&times;</button>
         <div class="mobile-nav-logo">
-            <img src="/images/pdlogo.png" alt="Pharmacies Doctor Logo" class="mobile-logo-img">
+            <img src="https://pharmacies.doctor/images/pdlogo.png" alt="Pharmacies Doctor Logo" class="mobile-logo-img">
         </div>
         <a href="/">Home</a>
         <a href="/about.html">About Us</a>
@@ -1009,7 +1009,7 @@
     <nav>
         <div class="nav-inner">
             <a class="logo" href="/" aria-label="Pharmacies Doctor Home">
-                <img src="/images/pdlogo.png" alt="Pharmacies Doctor Logo" class="site-logo-img">
+                <img src="https://pharmacies.doctor/images/pdlogo.png" alt="Pharmacies Doctor Logo" class="site-logo-img">
             </a>
             <div class="nav-links">
                 <a href="/">Home</a>
@@ -1079,7 +1079,7 @@
         <div class="footer-grid">
             <div class="footer-brand">
                 <a href="/" class="logo" style="margin-bottom:0; display:flex; align-items:center; gap:12px;">
-                    <img src="images/pdlogo.png" alt="Pharmacies Doctor Logo" class="footer-logo-img">
+                    <img src="https://pharmacies.doctor/images/pdlogo.png" alt="Pharmacies Doctor Logo" class="footer-logo-img">
                     <div class="logo-text">
                         <span style="color:white; font-weight:700; font-size:18px;">Pharmacies Doctor</span>
                     </div>
@@ -1307,7 +1307,7 @@
                 }
 
                 const blog = await response.json();
-                let resolvedOgImage = `${window.location.origin}/images/pdlogo.png`;
+                let resolvedOgImage = `https://pharmacies.doctor/images/pdlogo.png`;
 
                 document.getElementById("post-title").innerText = blog.title;
                 document.getElementById("post-category").innerText = blog.category || 'General';

@@ -1,0 +1,11 @@
+{
+  "checks": [
+    "orders: incorrect password is identified",
+    "orders: network/CORS failure is not labelled a password failure",
+    "orders: real cross-origin login succeeds and preserves password whitespace",
+    "blog: incorrect password is identified",
+    "blog: network/CORS failure is not labelled a password failure",
+    "blog: real cross-origin login succeeds and preserves password whitespace"
+  ],
+  "errors": []
+}

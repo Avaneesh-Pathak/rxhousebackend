@@ -4,13 +4,20 @@ const { Pool } = require("pg");
 const fs = require("fs");
 const path = require("path");
 const nodemailer = require("nodemailer");
+const crypto = require("crypto");
+const { normalizeOrderItems, roundMoney } = require("./catalog-pricing");
 
-if (process.env.NODE_ENV !== "production") {
-    require("dotenv").config();
-}
+// Hosting-panel values take precedence. A server-local .env also works in
+// production, regardless of the process manager's working directory.
+require("dotenv").config({ path: path.join(__dirname, ".env"), override: false, quiet: true });
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || "0.0.0.0";
+let databaseReady = false;
+let databaseInitializing = false;
+let databaseRetryTimer = null;
+let shuttingDown = false;
 
 // ============================================================
 // CONFIGURATION
@@ -26,10 +33,19 @@ const BACKEND_URL =
 
 // Keep uploaded media outside the Git checkout in production when possible.
 // Example: set UPLOAD_DIR to a persistent Hostinger directory.
+const DEFAULT_UPLOAD_DIR =
+    process.env.NODE_ENV === "production"
+        ? path.resolve(__dirname, "..", "pharmacies-doctor-data", "images")
+        : path.join(__dirname, "images");
+
 const UPLOAD_DIR =
     process.env.UPLOAD_DIR ||
-    path.join(__dirname, "images");
+    DEFAULT_UPLOAD_DIR;
 
+// Uploaded media is runtime/user data. In production the default location is
+// deliberately outside the application directory so Git deployments cannot
+// replace or delete uploaded images. Set UPLOAD_DIR explicitly on Hostinger
+// if you use a different persistent volume/path.
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 /*
@@ -45,48 +61,62 @@ const BLOG_TEMPLATE_URL =
     process.env.BLOG_TEMPLATE_URL ||
     `${BACKEND_URL}/blog-post.html`;
 
-const DATABASE_URL =
-    process.env.DATABASE_URL ||
-    "postgres://postgres:1726@localhost:5432/rxhouse";
+const DATABASE_URL = process.env.DATABASE_URL;
 
 if (!DATABASE_URL) {
-    console.error("DATABASE_URL is not configured. Set it in the server environment.");
+    console.error("DATABASE_URL is required. Configure it in the environment.");
     process.exit(1);
 }
+
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
+const ADMIN_TOKEN_SECRET = process.env.ADMIN_TOKEN_SECRET || "";
+const ADMIN_TOKEN_TTL_SECONDS = Number(process.env.ADMIN_TOKEN_TTL_SECONDS || 8 * 60 * 60);
+const ORDER_TAX_RATE = Number(process.env.ORDER_TAX_RATE || 0.06);
+const ORDER_SHIPPING_FLAT = Number(process.env.ORDER_SHIPPING_FLAT || 0);
+
+if (!Number.isInteger(ADMIN_TOKEN_TTL_SECONDS) || ADMIN_TOKEN_TTL_SECONDS < 60 || ADMIN_TOKEN_TTL_SECONDS > 86400) {
+    throw new Error("ADMIN_TOKEN_TTL_SECONDS must be a whole number between 60 and 86400.");
+}
+
+if (!Number.isFinite(ORDER_TAX_RATE) || ORDER_TAX_RATE < 0 || ORDER_TAX_RATE > 1) {
+    throw new Error("ORDER_TAX_RATE must be a number between 0 and 1.");
+}
+if (!Number.isFinite(ORDER_SHIPPING_FLAT) || ORDER_SHIPPING_FLAT < 0) {
+    throw new Error("ORDER_SHIPPING_FLAT must be a non-negative number.");
+}
+
+if (process.env.NODE_ENV === "production" && (!ADMIN_PASSWORD || !ADMIN_TOKEN_SECRET)) {
+    console.warn("ADMIN_PASSWORD and ADMIN_TOKEN_SECRET must be configured to use admin APIs in production.");
+}
+
 
 // ============================================================
 // CORS
 // ============================================================
 
+const ALLOWED_ORIGINS = new Set(
+    (process.env.CORS_ORIGINS ||
+        "http://localhost:5500,http://127.0.0.1:5500,http://localhost:3000,http://127.0.0.1:3000,https://pharmacies.doctor,https://www.pharmacies.doctor")
+        .split(",")
+        .map((value) => value.trim().replace(/\/+$/, ""))
+        .filter(Boolean)
+);
+
 app.use(
     cors({
-        origin: [
-            "http://localhost:5500",
-            "http://127.0.0.1:5500",
-            "http://localhost:3000",
-            "http://127.0.0.1:3000",
-
-            "https://pharmacies.doctor",
-            "https://www.pharmacies.doctor",
-            "https://pd.pharmacies.doctor",
-
-            "http://192.168.1.7:5500",
-        ],
-
-        methods: [
-            "GET",
-            "POST",
-            "PUT",
-            "DELETE",
-            "OPTIONS",
-        ],
-
-        allowedHeaders: [
-            "Content-Type",
-            "Authorization",
-        ],
-
+        origin(origin, callback) {
+            if (!origin || ALLOWED_ORIGINS.has(origin)) {
+                return callback(null, true);
+            }
+            const error = new Error("CORS origin not allowed");
+            error.status = 403;
+            error.code = "ORIGIN_NOT_ALLOWED";
+            return callback(error);
+        },
+        methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allowedHeaders: ["Content-Type", "Authorization", "X-Request-ID"],
         credentials: true,
+        maxAge: 86400,
     })
 );
 
@@ -100,28 +130,252 @@ app.use(
     })
 );
 
-// Basic API security headers. Authentication/authorization for admin mutations
-// should be enforced by the deployment layer before exposing admin routes.
+// Production-safe defaults. Keep HTML CSP on the frontend host where its
+// third-party resources are known; the API uses response headers that are
+// safe for JSON/static resources without breaking the existing frontend.
 app.disable("x-powered-by");
+app.set("trust proxy", 1);
+
 app.use((req, res, next) => {
+    const requestId = req.get("X-Request-ID") || crypto.randomUUID();
+    req.requestId = requestId;
+    res.setHeader("X-Request-ID", requestId);
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    res.setHeader("Cache-Control", "no-store");
+    if (process.env.NODE_ENV === "production") {
+        res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
     next();
 });
+
+// Lightweight in-process rate limiter for public mutation endpoints. It is
+// intentionally dependency-free and acts as a safety net; use a proxy/WAF
+// rate limit as the authoritative distributed limit in production.
+const rateBuckets = new Map();
+const RATE_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT = 120;
+function publicRateLimit(req, res, next) {
+    if (req.method === "GET" || req.path === "/health" || req.path === "/health/ready") {
+        return next();
+    }
+    const key = req.ip || "unknown";
+    const now = Date.now();
+    const bucket = rateBuckets.get(key);
+    if (!bucket || now - bucket.startedAt >= RATE_WINDOW_MS) {
+        rateBuckets.set(key, { startedAt: now, count: 1 });
+        return next();
+    }
+    bucket.count += 1;
+    if (bucket.count > RATE_LIMIT) {
+        res.setHeader("Retry-After", "60");
+        return res.status(429).json({ error: "Too many requests. Please try again later." });
+    }
+    return next();
+}
+app.use("/api", publicRateLimit);
+
+// ============================================================
+// ADMIN AUTHENTICATION
+// ============================================================
+
+const adminLoginBuckets = new Map();
+const ADMIN_LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const ADMIN_LOGIN_LIMIT = 10;
+
+function adminLoginRateLimit(req, res, next) {
+    const key = req.ip || "unknown";
+    const now = Date.now();
+    const bucket = adminLoginBuckets.get(key);
+
+    if (!bucket || now - bucket.startedAt >= ADMIN_LOGIN_WINDOW_MS) {
+        adminLoginBuckets.set(key, { startedAt: now, count: 1 });
+        return next();
+    }
+
+    bucket.count += 1;
+    if (bucket.count > ADMIN_LOGIN_LIMIT) {
+        res.setHeader("Retry-After", String(Math.ceil(ADMIN_LOGIN_WINDOW_MS / 1000)));
+        return res.status(429).json({ error: "Too many admin login attempts. Please try again later." });
+    }
+    return next();
+}
+
+function secureStringEqual(a, b) {
+    const left = crypto.createHash("sha256").update(String(a || "")).digest();
+    const right = crypto.createHash("sha256").update(String(b || "")).digest();
+    return crypto.timingSafeEqual(left, right);
+}
+
+function signAdminToken() {
+    const payload = Buffer.from(JSON.stringify({
+        exp: Math.floor(Date.now() / 1000) + ADMIN_TOKEN_TTL_SECONDS,
+        nonce: crypto.randomBytes(16).toString("hex"),
+    })).toString("base64url");
+
+    const signature = crypto
+        .createHmac("sha256", ADMIN_TOKEN_SECRET)
+        .update(payload)
+        .digest("base64url");
+
+    return `${payload}.${signature}`;
+}
+
+function verifyAdminToken(token) {
+    if (!ADMIN_TOKEN_SECRET || !token || !token.includes(".")) return false;
+    const parts = token.split(".");
+    if (parts.length !== 2) return false;
+    const [payload, signature] = parts;
+    if (!payload || !signature) return false;
+
+    const expected = crypto
+        .createHmac("sha256", ADMIN_TOKEN_SECRET)
+        .update(payload)
+        .digest("base64url");
+
+    if (!secureStringEqual(signature, expected)) return false;
+
+    try {
+        const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+        return Number.isFinite(data.exp) && data.exp > Math.floor(Date.now() / 1000);
+    } catch (_) {
+        return false;
+    }
+}
+
+function requireAdmin(req, res, next) {
+    const auth = req.get("Authorization") || "";
+    const match = auth.match(/^Bearer\s+(.+)$/i);
+    if (!match || !verifyAdminToken(match[1])) {
+        return res.status(401).json({ code: "ADMIN_AUTH_REQUIRED", error: "Admin authentication required." });
+    }
+    return next();
+}
+
+app.post("/api/admin/login", adminLoginRateLimit, (req, res) => {
+    if (!ADMIN_PASSWORD || !ADMIN_TOKEN_SECRET) {
+        return res.status(503).json({ code: "ADMIN_NOT_CONFIGURED", error: "Admin authentication is not configured. Set ADMIN_PASSWORD and ADMIN_TOKEN_SECRET on the backend, then restart it." });
+    }
+
+    const password = typeof req.body?.password === "string" ? req.body.password : "";
+    if (!password || !secureStringEqual(password, ADMIN_PASSWORD)) {
+        return res.status(401).json({ code: "INVALID_CREDENTIALS", error: "Invalid admin credentials." });
+    }
+
+    return res.json({
+        token: signAdminToken(),
+        expiresIn: ADMIN_TOKEN_TTL_SECONDS,
+    });
+});
+
+// Verifies the token without querying the database or exposing customer data.
+app.get("/api/admin/session", requireAdmin, (req, res) => {
+    res.json({ authenticated: true });
+});
+
+function cleanText(value, maxLength = 500) {
+    return String(value ?? "").trim().slice(0, maxLength);
+}
+
+function isValidEmail(value) {
+    const email = cleanText(value, 254);
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function validateOrderPayload(body) {
+    const billing = body && typeof body.billing === "object" ? body.billing : null;
+    const items = Array.isArray(body?.items) ? body.items : [];
+
+    if (!billing) return "Billing information is required.";
+    if (!isValidEmail(billing.email)) return "A valid email address is required.";
+    if (!cleanText(billing.firstName, 80) || !cleanText(billing.lastName, 80)) return "Customer name is required.";
+    if (!cleanText(billing.phone, 40)) return "Phone number is required.";
+    if (!cleanText(billing.street, 200) || !cleanText(billing.city, 120) || !cleanText(billing.state, 120) || !cleanText(billing.zip, 30)) {
+        return "A complete shipping address is required.";
+    }
+
+    const limits = {
+        firstName: 80,
+        lastName: 80,
+        email: 254,
+        phone: 40,
+        street: 200,
+        city: 120,
+        state: 120,
+        zip: 30,
+        country: 120,
+        notes: 5000,
+    };
+    for (const [field, max] of Object.entries(limits)) {
+        if (String(billing[field] ?? "").length > max) return `${field} is too long.`;
+    }
+
+    try {
+        normalizeOrderItems(items);
+    } catch (error) {
+        return error.message || "Invalid order items.";
+    }
+
+    return null;
+}
+
+function normalizeBilling(billing) {
+    return {
+        firstName: cleanText(billing?.firstName, 80),
+        lastName: cleanText(billing?.lastName, 80),
+        email: cleanText(billing?.email, 254).toLowerCase(),
+        phone: cleanText(billing?.phone, 40),
+        street: cleanText(billing?.street, 200),
+        city: cleanText(billing?.city, 120),
+        state: cleanText(billing?.state, 120),
+        zip: cleanText(billing?.zip, 30),
+        country: cleanText(billing?.country || "United States", 120),
+        notes: cleanText(billing?.notes, 5000),
+    };
+}
+
+function sanitizeBlogHtml(html) {
+    const cheerio = require("cheerio");
+    const $ = cheerio.load(`<div id="pd-blog-root">${String(html || "")}</div>`, null, false);
+    $("script, style, object, embed, form, input, button, meta, link").remove();
+    $("*").each((_, el) => {
+        const attrs = { ...(el.attribs || {}) };
+        for (const [name, value] of Object.entries(attrs)) {
+            const lower = name.toLowerCase();
+            if (lower.startsWith("on") || lower === "srcdoc") {
+                $(el).removeAttr(name);
+                continue;
+            }
+            if (["href", "src", "xlink:href"].includes(lower) && /^\s*javascript:/i.test(String(value || ""))) {
+                $(el).removeAttr(name);
+            }
+        }
+    });
+    return $("#pd-blog-root").html() || "";
+}
 
 // ============================================================
 // REQUEST LOGGER
 // ============================================================
 
 app.use((req, res, next) => {
-    console.log(
-        `[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`
-    );
-
-    if (req.headers.origin) {
-        console.log("Origin:", req.headers.origin);
-    }
-
+    const startedAt = process.hrtime.bigint();
+    res.on("finish", () => {
+        const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+        console.log(
+            JSON.stringify({
+                time: new Date().toISOString(),
+                requestId: req.requestId,
+                method: req.method,
+                path: req.originalUrl,
+                status: res.statusCode,
+                durationMs: Number(durationMs.toFixed(2)),
+                ip: req.ip,
+            })
+        );
+    });
     next();
 });
 
@@ -145,9 +399,9 @@ app.use(
         maxAge: "30d",
         etag: true,
         lastModified: true,
-        immutable: true,
         setHeaders: (res) => {
-            res.setHeader("Cache-Control", "public, max-age=2592000, immutable");
+            res.setHeader("Cache-Control", "public, max-age=2592000");
+            res.setHeader("Content-Disposition", "inline");
         }
     })
 );
@@ -200,6 +454,27 @@ function getDatabaseSSL() {
 const pool = new Pool({
     connectionString: DATABASE_URL,
     ssl: getDatabaseSSL(),
+    max: Number(process.env.DB_POOL_MAX || 10),
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+    statement_timeout: Number(process.env.DB_STATEMENT_TIMEOUT_MS || 15000),
+});
+
+pool.on("error", (error) => {
+    console.error("Unexpected PostgreSQL pool error:", error.message);
+});
+
+// CORS preflights and login are handled before this database readiness gate.
+// Never accept orders or serve admin data before schema initialization succeeds.
+app.use("/api", (req, res, next) => {
+    if (!databaseReady) {
+        res.setHeader("Retry-After", "10");
+        return res.status(503).json({
+            code: "DATABASE_UNAVAILABLE",
+            error: "The database is temporarily unavailable. Please try again shortly.",
+        });
+    }
+    next();
 });
 
 // ============================================================
@@ -584,6 +859,7 @@ app.get(
                     "SELECT * FROM products ORDER BY id"
                 );
 
+            res.set("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
             res.json(rows);
         } catch (err) {
             console.error(err);
@@ -610,6 +886,11 @@ app.post(
             browser,
         } = req.body;
 
+        const safePlatform = cleanText(platform, 40);
+        if (!safePlatform) {
+            return res.status(400).json({ error: "Platform is required." });
+        }
+
         try {
             const result =
                 await pool.query(
@@ -627,13 +908,12 @@ app.post(
                     RETURNING id
                     `,
                     [
-                        platform,
-                        fullDate ||
-                            new Date().toISOString(),
+                        safePlatform,
+                        cleanText(fullDate, 64) || new Date().toISOString(),
                         new Date().toLocaleString(),
-                        page || "",
-                        device || "",
-                        browser || "",
+                        cleanText(page, 300),
+                        cleanText(device, 80),
+                        cleanText(browser, 500),
                     ]
                 );
 
@@ -653,6 +933,7 @@ app.post(
 
 app.get(
     "/api/social-clicks",
+    requireAdmin,
     async (req, res) => {
         try {
             const { rows } =
@@ -679,6 +960,7 @@ app.get(
 
 app.delete(
     "/api/social-clicks",
+    requireAdmin,
     async (req, res) => {
         try {
             await pool.query(
@@ -707,27 +989,29 @@ app.delete(
 app.post(
     "/api/orders",
     async (req, res) => {
-        const {
-            id,
-            billing,
-            items,
-            itemCount,
-            subtotal,
-            shipping,
-            tax,
-            total,
-            date,
-        } = req.body;
+        const orderValidationError = validateOrderPayload(req.body);
+        if (orderValidationError) {
+            return res.status(400).json({ success: false, error: orderValidationError });
+        }
 
-        const orderId =
-            id || Date.now().toString();
+        const orderId = crypto.randomUUID();
+        const billingData = normalizeBilling(req.body.billing);
+        const normalizedItems = normalizeOrderItems(req.body.items);
+        const subtotal = roundMoney(
+            normalizedItems.reduce((sum, item) => sum + item.linePrice, 0)
+        );
+        const shipping = roundMoney(ORDER_SHIPPING_FLAT);
+        const tax = roundMoney(subtotal * ORDER_TAX_RATE);
+        const total = roundMoney(subtotal + shipping + tax);
+        const orderDate = new Date().toISOString();
 
+        const client = await pool.connect();
         try {
-            // ----------------------------------------------------
-            // SAVE ORDER
-            // ----------------------------------------------------
+            // The order header and line items are committed atomically. This avoids
+            // orphaned/partial orders when one insert fails.
+            await client.query("BEGIN");
 
-            await pool.query(
+            await client.query(
                 `
                 INSERT INTO orders
                 (
@@ -740,380 +1024,143 @@ app.post(
                     total,
                     date
                 )
-                VALUES
-                ($1, $2, $3, $4, $5, $6, $7, $8)
-                ON CONFLICT (id) DO NOTHING
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 `,
                 [
                     orderId,
-                    billing || {},
-                    itemCount,
+                    billingData,
+                    normalizedItems.length,
                     subtotal,
                     shipping,
                     tax,
                     total,
-                    date ||
-                        new Date().toISOString(),
+                    orderDate,
                 ]
             );
 
-            // ----------------------------------------------------
-            // SAVE ORDER ITEMS
-            // ----------------------------------------------------
-
-            if (
-                Array.isArray(items) &&
-                items.length
-            ) {
-                const client =
-                    await pool.connect();
-
-                try {
-                    await client.query(
-                        "BEGIN"
-                    );
-
-                    const stmt = `
-                        INSERT INTO order_items
-                        (
-                            order_id,
-                            name,
-                            pillQty,
-                            linePrice
-                        )
-                        VALUES ($1, $2, $3, $4)
-                    `;
-
-                    for (const it of items) {
-                        await client.query(
-                            stmt,
-                            [
-                                orderId,
-                                it.name,
-                                it.pillQty || 0,
-                                it.linePrice || 0,
-                            ]
-                        );
-                    }
-
-                    await client.query(
-                        "COMMIT"
-                    );
-                } catch (err) {
-                    await client.query(
-                        "ROLLBACK"
-                    );
-
-                    console.error(
-                        "Order items error:",
-                        err.message
-                    );
-
-                    // Do not hide a database failure.
-                    throw err;
-                } finally {
-                    client.release();
-                }
-            }
-
-            // ----------------------------------------------------
-            // BILLING DATA
-            // ----------------------------------------------------
-
-            const billingData =
-                billing || {};
-
-            // ----------------------------------------------------
-            // ORDER EMAIL HTML
-            // ----------------------------------------------------
-
-            const html = `
-                <h2>New Order Received</h2>
-
-                <h3>Customer Details</h3>
-
-                <table
-                    border="1"
-                    cellpadding="8"
-                    style="border-collapse:collapse;"
-                >
-                    <tr>
-                        <td>Name</td>
-                        <td>
-                            ${escapeHtml(
-                                billingData.firstName
-                            )}
-                            ${escapeHtml(
-                                billingData.lastName
-                            )}
-                        </td>
-                    </tr>
-
-                    <tr>
-                        <td>Email</td>
-                        <td>
-                            ${escapeHtml(
-                                billingData.email
-                            )}
-                        </td>
-                    </tr>
-
-                    <tr>
-                        <td>Phone</td>
-                        <td>
-                            ${escapeHtml(
-                                billingData.phone
-                            )}
-                        </td>
-                    </tr>
-
-                    <tr>
-                        <td>Street</td>
-                        <td>
-                            ${escapeHtml(
-                                billingData.street
-                            )}
-                        </td>
-                    </tr>
-
-                    <tr>
-                        <td>City</td>
-                        <td>
-                            ${escapeHtml(
-                                billingData.city
-                            )}
-                        </td>
-                    </tr>
-
-                    <tr>
-                        <td>State</td>
-                        <td>
-                            ${escapeHtml(
-                                billingData.state
-                            )}
-                        </td>
-                    </tr>
-
-                    <tr>
-                        <td>Zip</td>
-                        <td>
-                            ${escapeHtml(
-                                billingData.zip
-                            )}
-                        </td>
-                    </tr>
-
-                    <tr>
-                        <td>Country</td>
-                        <td>
-                            ${escapeHtml(
-                                billingData.country
-                            )}
-                        </td>
-                    </tr>
-                </table>
-
-                <br>
-
-                <h3>Items</h3>
-
-                <table
-                    border="1"
-                    cellpadding="8"
-                    style="border-collapse:collapse;"
-                >
-                    <tr>
-                        <th>Name</th>
-                        <th>Qty</th>
-                        <th>Price</th>
-                    </tr>
-
-                    ${(items || [])
-                        .map(
-                            (i) => `
-                                <tr>
-                                    <td>
-                                        ${escapeHtml(
-                                            i.name
-                                        )}
-                                    </td>
-
-                                    <td>
-                                        ${escapeHtml(
-                                            i.pillQty
-                                        )}
-                                    </td>
-
-                                    <td>
-                                        $${escapeHtml(
-                                            i.linePrice
-                                        )}
-                                    </td>
-                                </tr>
-                            `
-                        )
-                        .join("")}
-                </table>
-
-                <h3>Totals</h3>
-
-                <p>
-                    Subtotal : $${escapeHtml(
-                        subtotal
-                    )}<br>
-
-                    Tax : $${escapeHtml(
-                        tax
-                    )}<br>
-
-                    Grand Total : $${escapeHtml(
-                        total
-                    )}
-                </p>
-
-                <p>
-                    Notes :
-                    ${
-                        escapeHtml(
-                            billingData.notes
-                        ) || "None"
-                    }
-                </p>
+            const itemStatement = `
+                INSERT INTO order_items
+                (
+                    order_id,
+                    name,
+                    pillQty,
+                    linePrice
+                )
+                VALUES ($1, $2, $3, $4)
             `;
 
-            // ====================================================
-            // IMPORTANT
-            // THE ORDER IS ALREADY SAVED.
-            //
-            // EMAIL FAILURE MUST NEVER CHANGE ORDER SUCCESS
-            // INTO HTTP 500.
-            // ====================================================
-
-            // ----------------------------------------------------
-            // ADMIN EMAIL
-            // ----------------------------------------------------
-
-            try {
-                if (
-                    transporter &&
-                    SMTP_USER &&
-                    EMAIL_TO
-                ) {
-                    await transporter.sendMail({
-                        from: SMTP_USER,
-                        to: EMAIL_TO,
-                        subject:
-                            `New Order ${orderId}`,
-                        html,
-                    });
-
-                    console.log(
-                        `Admin order email sent successfully for order ${orderId}`
-                    );
-                } else {
-                    console.warn(
-                        `Admin order email skipped for order ${orderId}: SMTP is not configured.`
-                    );
-                }
-            } catch (emailError) {
-                console.error(
-                    `Admin order email failed for order ${orderId}:`,
-                    emailError.message
-                );
-
-                // VERY IMPORTANT:
-                // Do not throw here.
-                //
-                // The order has already been saved.
+            for (const item of normalizedItems) {
+                await client.query(itemStatement, [
+                    orderId,
+                    item.name,
+                    item.pillQty,
+                    item.linePrice,
+                ]);
             }
 
-            // ----------------------------------------------------
-            // CUSTOMER CONFIRMATION EMAIL
-            // ----------------------------------------------------
-
-            try {
-                if (
-                    transporter &&
-                    SMTP_USER &&
-                    billingData.email
-                ) {
-                    await transporter.sendMail({
-                        from: SMTP_USER,
-                        to: billingData.email,
-                        subject:
-                            "Order Confirmation - Pharmacies Doctor",
-
-                        html: `
-                            <h2>
-                                Thank You for Your Order
-                            </h2>
-
-                            <p>
-                                Your order has been
-                                received successfully.
-                            </p>
-
-                            <p>
-                                One of our representatives
-                                will contact you shortly.
-                            </p>
-
-                            <p>
-                                <b>Order ID:</b>
-                                ${escapeHtml(
-                                    orderId
-                                )}
-                            </p>
-                        `,
-                    });
-
-                    console.log(
-                        `Customer confirmation email sent successfully for order ${orderId}`
-                    );
-                } else {
-                    console.warn(
-                        `Customer confirmation email skipped for order ${orderId}: SMTP or customer email is missing.`
-                    );
-                }
-            } catch (emailError) {
-                console.error(
-                    `Customer confirmation email failed for order ${orderId}:`,
-                    emailError.message
-                );
-
-                // VERY IMPORTANT:
-                // Do not throw here.
-                //
-                // The order has already been saved.
-            }
-
-            // ----------------------------------------------------
-            // FINAL ORDER SUCCESS
-            // ----------------------------------------------------
-
-            return res.status(201).json({
-                success: true,
-                id: orderId,
-                message:
-                    "Order placed successfully.",
-            });
-        } catch (err) {
-            console.error(
-                "ORDER API ERROR:"
-            );
-
-            console.error(err);
-
+            await client.query("COMMIT");
+        } catch (error) {
+            await client.query("ROLLBACK");
+            console.error("ORDER DATABASE ERROR:", error);
             return res.status(500).json({
                 success: false,
                 error: "Unable to save order",
                 detail:
-                    process.env.NODE_ENV ===
-                    "production"
+                    process.env.NODE_ENV === "production"
                         ? "A server error occurred while processing the order."
-                        : err.message,
+                        : error.message,
             });
+        } finally {
+            client.release();
         }
+
+        const html = `
+            <h2>New Order Request Received</h2>
+
+            <h3>Customer Details</h3>
+
+            <table border="1" cellpadding="8" style="border-collapse:collapse;">
+                <tr><td>Name</td><td>${escapeHtml(billingData.firstName)} ${escapeHtml(billingData.lastName)}</td></tr>
+                <tr><td>Email</td><td>${escapeHtml(billingData.email)}</td></tr>
+                <tr><td>Phone</td><td>${escapeHtml(billingData.phone)}</td></tr>
+                <tr><td>Street</td><td>${escapeHtml(billingData.street)}</td></tr>
+                <tr><td>City</td><td>${escapeHtml(billingData.city)}</td></tr>
+                <tr><td>State</td><td>${escapeHtml(billingData.state)}</td></tr>
+                <tr><td>Zip</td><td>${escapeHtml(billingData.zip)}</td></tr>
+                <tr><td>Country</td><td>${escapeHtml(billingData.country)}</td></tr>
+            </table>
+
+            <br>
+            <h3>Items</h3>
+
+            <table border="1" cellpadding="8" style="border-collapse:collapse;">
+                <tr><th>Name</th><th>Pills</th><th>Price</th></tr>
+                ${normalizedItems.map((item) => `
+                    <tr>
+                        <td>${escapeHtml(item.name)}</td>
+                        <td>${escapeHtml(item.pillQty)}</td>
+                        <td>$${escapeHtml(item.linePrice.toFixed(2))}</td>
+                    </tr>
+                `).join("")}
+            </table>
+
+            <h3>Totals</h3>
+            <p>
+                Subtotal : $${escapeHtml(subtotal.toFixed(2))}<br>
+                Shipping : $${escapeHtml(shipping.toFixed(2))}<br>
+                Tax : $${escapeHtml(tax.toFixed(2))}<br>
+                Grand Total : $${escapeHtml(total.toFixed(2))}
+            </p>
+
+            <p>Notes : ${escapeHtml(billingData.notes) || "None"}</p>
+        `;
+
+        // The database commit is the source of truth. Email failures are logged
+        // but intentionally do not turn a successfully saved request into HTTP 500.
+        try {
+            if (transporter && SMTP_USER && EMAIL_TO) {
+                await transporter.sendMail({
+                    from: SMTP_USER,
+                    to: EMAIL_TO,
+                    subject: `New Order Request ${orderId}`,
+                    html,
+                });
+                console.log(`Admin order email sent successfully for order ${orderId}`);
+            } else {
+                console.warn(`Admin order email skipped for order ${orderId}: SMTP is not configured.`);
+            }
+        } catch (emailError) {
+            console.error(`Admin order email failed for order ${orderId}:`, emailError.message);
+        }
+
+        try {
+            if (transporter && SMTP_USER && billingData.email) {
+                await transporter.sendMail({
+                    from: SMTP_USER,
+                    to: billingData.email,
+                    subject: "Order Request Received - Pharmacies Doctor",
+                    html: `
+                        <h2>Order Request Received</h2>
+                        <p>We received your order request.</p>
+                        <p>Submitting a request does not guarantee dispensing or shipment. Any medication that requires a valid prescription must be verified before fulfillment.</p>
+                        <p>Our team will contact you with the next applicable steps.</p>
+                        <p><b>Request ID:</b> ${escapeHtml(orderId)}</p>
+                    `,
+                });
+                console.log(`Customer confirmation email sent successfully for order ${orderId}`);
+            } else {
+                console.warn(`Customer confirmation email skipped for order ${orderId}: SMTP or customer email is missing.`);
+            }
+        } catch (emailError) {
+            console.error(`Customer confirmation email failed for order ${orderId}:`, emailError.message);
+        }
+
+        return res.status(201).json({
+            success: true,
+            id: orderId,
+            message: "Order request received.",
+            totals: { subtotal, shipping, tax, total },
+        });
     }
 );
 
@@ -1123,6 +1170,7 @@ app.post(
 
 app.get(
     "/api/orders",
+    requireAdmin,
     async (req, res) => {
         try {
             const { rows } =
@@ -1203,6 +1251,7 @@ app.get(
 
 app.delete(
     "/api/orders",
+    requireAdmin,
     async (req, res) => {
         try {
             await pool.query(
@@ -1291,7 +1340,7 @@ app.get(
             }
 
             res.set("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
-            res.json(rows[0]);
+            res.json({ ...rows[0], content: sanitizeBlogHtml(rows[0].content) });
         } catch (err) {
             console.error(err);
             res.status(500).json({ error: "Unable to fetch blog post" });
@@ -1305,6 +1354,7 @@ app.get(
 
 app.get(
     "/api/admin/blogs",
+    requireAdmin,
     async (req, res) => {
         try {
             const { rows } =
@@ -1334,6 +1384,7 @@ app.get(
 
 app.post(
     "/api/blogs",
+    requireAdmin,
     async (req, res) => {
         const {
             title,
@@ -1371,7 +1422,7 @@ app.post(
                 title,
                 slug,
                 excerpt || "",
-                content,
+                sanitizeBlogHtml(content),
                 featured_image || "",
                 category || "",
                 author || "Pharmacies Doctor",
@@ -1419,6 +1470,7 @@ app.post(
 
 app.put(
     "/api/blogs/:id",
+    requireAdmin,
     async (req, res) => {
         const { id } =
             req.params;
@@ -1457,7 +1509,7 @@ app.put(
                 title,
                 slug,
                 excerpt,
-                content,
+                sanitizeBlogHtml(content),
                 featured_image,
                 category,
                 author,
@@ -1502,6 +1554,7 @@ app.put(
 
 app.delete(
     "/api/blogs/:id",
+    requireAdmin,
     async (req, res) => {
         const { id } =
             req.params;
@@ -1568,6 +1621,22 @@ app.post(
                 error:
                     "Please fill in all required fields.",
             });
+        }
+
+        if (!isValidEmail(email)) {
+            return res.status(400).json({ success: false, error: "Please enter a valid email address." });
+        }
+
+        const contactLimits = {
+            first_name: [first_name, 80], last_name: [last_name, 80], email: [email, 254],
+            phone: [phone, 40], subject: [subject, 200], message: [message, 10000],
+            landing_page: [landing_page, 500], source: [source, 120], medium: [medium, 120],
+            campaign: [campaign, 200], country: [country, 120],
+        };
+        for (const [field, [value, max]] of Object.entries(contactLimits)) {
+            if (String(value ?? "").length > max) {
+                return res.status(400).json({ success: false, error: `${field} is too long.` });
+            }
         }
 
         try {
@@ -1739,6 +1808,7 @@ app.post(
 
 app.get(
     "/api/contact",
+    requireAdmin,
     async (req, res) => {
         try {
             const { rows } =
@@ -1767,6 +1837,7 @@ app.get(
 
 app.get(
     "/api/contact/stats",
+    requireAdmin,
     async (req, res) => {
         try {
             const total =
@@ -1812,6 +1883,7 @@ app.get(
 
 app.delete(
     "/api/contact",
+    requireAdmin,
     async (req, res) => {
         try {
             await pool.query(
@@ -1840,6 +1912,7 @@ app.delete(
 
 app.post(
     "/api/upload-base64",
+    requireAdmin,
     (req, res) => {
         const { image } =
             req.body;
@@ -1882,10 +1955,17 @@ app.post(
                 });
             }
 
-            const ext =
-                matches[1].split(
-                    "/"
-                )[1];
+            const mime = String(matches[1] || "").toLowerCase();
+            const allowedImageTypes = new Map([
+                ["image/jpeg", "jpg"],
+                ["image/png", "png"],
+                ["image/webp", "webp"],
+                ["image/avif", "avif"],
+            ]);
+            const ext = allowedImageTypes.get(mime);
+            if (!ext) {
+                return res.status(415).json({ error: "Only JPEG, PNG, WebP and AVIF images are allowed." });
+            }
 
             const base64Data =
                 matches[2];
@@ -1895,6 +1975,10 @@ app.post(
                     base64Data,
                     "base64"
                 );
+
+            if (!buffer.length || buffer.length > 5 * 1024 * 1024) {
+                return res.status(413).json({ error: "Image must be between 1 byte and 5 MB." });
+            }
 
             const fileName =
                 `${Date.now()}-${Math.round(
@@ -1932,74 +2016,69 @@ app.post(
 // HEALTH CHECK
 // ============================================================
 
-app.get(
-    "/health",
-    (req, res) => {
-        res.json({
-            status: "ok",
-        });
+app.get("/health", (req, res) => {
+    res.status(200).json({
+        status: "ok",
+        service: "pharmacies-doctor-api",
+        uptime: Math.round(process.uptime()),
+        timestamp: new Date().toISOString(),
+    });
+});
+
+app.get("/health/ready", async (req, res) => {
+    if (!databaseReady) {
+        return res.status(503).json({ status: "not_ready", database: "unavailable" });
     }
-);
+    try {
+        await pool.query("SELECT 1");
+        return res.status(200).json({ status: "ready", database: "ok" });
+    } catch (error) {
+        console.error("Readiness check failed:", error.message);
+        return res.status(503).json({ status: "not_ready", database: "unavailable" });
+    }
+});
 
 // ============================================================
 // BLOG TEMPLATE FETCHER
 // ============================================================
 
 async function getBlogPostTemplate() {
-    console.log(
-        "Fetching blog template from:",
-        BLOG_TEMPLATE_URL
-    );
+    // Prefer the local template. This avoids a self-HTTP request on every
+    // blog page and keeps SSR independent of DNS/TLS/network availability.
+    const localCandidates = [
+        path.join(__dirname, "blog-post.html"),
+        path.join(__dirname, "../public_html/blog-post.html"),
+    ];
 
-    if (
-        typeof fetch !==
-        "function"
-    ) {
-        throw new Error(
-            "Global fetch is unavailable. Node.js 18+ is required."
-        );
+    for (const candidate of localCandidates) {
+        if (fs.existsSync(candidate)) {
+            const html = await fs.promises.readFile(candidate, "utf8");
+            if (html.length >= 100) return html;
+        }
     }
 
-    const response =
-        await fetch(
-            BLOG_TEMPLATE_URL,
-            {
-                cache: "no-store",
+    // Compatibility fallback for deployments where the template is hosted
+    // only on the frontend. This path is no longer used in the normal layout.
+    if (typeof fetch !== "function") {
+        throw new Error("Global fetch is unavailable. Node.js 18+ is required.");
+    }
 
-                headers: {
-                    "User-Agent":
-                        "PharmaciesDoctor-Blog-SSR/1.0",
-
-                    Accept:
-                        "text/html",
-                },
-            }
-        );
+    const response = await fetch(BLOG_TEMPLATE_URL, {
+        cache: "no-store",
+        headers: {
+            "User-Agent": "PharmaciesDoctor-Blog-SSR/2.0",
+            Accept: "text/html",
+        },
+    });
 
     if (!response.ok) {
-        throw new Error(
-            `Unable to fetch blog-post.html: HTTP ${response.status}`
-        );
+        throw new Error(`Unable to fetch blog-post.html: HTTP ${response.status}`);
     }
 
-    const html =
-        await response.text();
-
-    if (
-        !html ||
-        html.length < 100
-    ) {
-        throw new Error(
-            "blog-post.html was fetched but appears to be empty."
-        );
+    const html = await response.text();
+    if (!html || html.length < 100) {
+        throw new Error("blog-post.html was fetched but appears to be empty.");
     }
-
-    console.log(
-        "Blog template fetched successfully:",
-        html.length,
-        "bytes"
-    );
-
     return html;
 }
 
@@ -2145,8 +2224,10 @@ app.get(
                     );
             }
 
-            const blog =
-                rows[0];
+            const blog = {
+                ...rows[0],
+                content: sanitizeBlogHtml(rows[0].content),
+            };
 
             console.log(
                 "BLOG FOUND:",
@@ -2317,17 +2398,7 @@ app.get(
 
             res.setHeader(
                 "Cache-Control",
-                "no-cache, no-store, must-revalidate"
-            );
-
-            res.setHeader(
-                "Pragma",
-                "no-cache"
-            );
-
-            res.setHeader(
-                "Expires",
-                "0"
+                "public, max-age=60, stale-while-revalidate=300"
             );
 
             res.send(html);
@@ -2397,6 +2468,20 @@ app.get(
 );
 
 // ============================================================
+// 404 HANDLER
+// ============================================================
+
+app.use((req, res, next) => {
+    if (req.path.startsWith("/api/")) {
+        return res.status(404).json({
+            error: "Route not found",
+            requestId: req.requestId,
+        });
+    }
+    return res.status(404).type("text/plain").send("Not found");
+});
+
+// ============================================================
 // ERROR HANDLER
 // ============================================================
 
@@ -2409,13 +2494,20 @@ app.use(
     ) => {
         console.error(
             "Unhandled Express Error:",
-            err
+            { code: err.code || err.type || "INTERNAL_ERROR", requestId: req.requestId }
         );
 
         if (
             res.headersSent
         ) {
             return next(err);
+        }
+
+        if (err.code === "ORIGIN_NOT_ALLOWED") {
+            return res.status(403).json({ code: err.code, error: "This website origin is not allowed by the API." });
+        }
+        if (err.type === "entity.parse.failed") {
+            return res.status(400).json({ code: "INVALID_JSON", error: "The request body must be valid JSON." });
         }
 
         res.status(500).json({
@@ -2429,75 +2521,51 @@ app.use(
 // START SERVER
 // ============================================================
 
-(async function init() {
+async function initializeDatabase() {
+    if (databaseInitializing || databaseReady || shuttingDown) return;
+    databaseInitializing = true;
     try {
-        console.log(
-            "================================="
-        );
-
-        console.log(
-            "Starting Pharmacies Doctor backend"
-        );
-
-        console.log(
-            "Environment:",
-            process.env.NODE_ENV ||
-                "development"
-        );
-
-        console.log(
-            "PORT:",
-            PORT
-        );
-
-        console.log(
-            "SITE URL:",
-            SITE_URL
-        );
-
-        console.log(
-            "BLOG TEMPLATE:",
-            BLOG_TEMPLATE_URL
-        );
-
-        console.log(
-            "================================="
-        );
-
         await createTables();
-
-        console.log(
-            "Database tables ready"
-        );
-
         await seedProductsIfEmpty();
-
-        app.listen(
-            PORT,
-            () => {
-                console.log(
-                    "================================="
-                );
-
-                console.log(
-                    `Backend running on port ${PORT}`
-                );
-
-                console.log(
-                    `Blog template: ${BLOG_TEMPLATE_URL}`
-                );
-
-                console.log(
-                    "================================="
-                );
-            }
-        );
-    } catch (err) {
-        console.error(
-            "Initialization failed:",
-            err
-        );
-
-        process.exit(1);
+        databaseReady = true;
+        console.log("Database initialized; API data routes are ready.");
+    } catch (error) {
+        databaseReady = false;
+        console.error("Database initialization failed. Check DATABASE_URL, database permissions and connectivity.", error.code || "DATABASE_ERROR");
+        if (!shuttingDown) {
+            databaseRetryTimer = setTimeout(initializeDatabase, 10000);
+            databaseRetryTimer.unref();
+        }
+    } finally {
+        databaseInitializing = false;
     }
-})();
+}
+
+function startServer() {
+    const server = app.listen(PORT, HOST, () => {
+        console.log(`Pharmacies Doctor API listening on ${HOST}:${server.address().port}`);
+        console.log("GET /health checks the process; GET /health/ready checks the database.");
+        initializeDatabase();
+    });
+    server.on("error", error => {
+        console.error("HTTP server failed to start:", error.code || "LISTEN_ERROR");
+        process.exitCode = 1;
+    });
+    const shutdown = signal => {
+        if (shuttingDown) return;
+        shuttingDown = true;
+        console.log(`${signal} received. Shutting down gracefully...`);
+        clearTimeout(databaseRetryTimer);
+        server.close(async () => {
+            try { await pool.end(); }
+            finally { process.exit(0); }
+        });
+        setTimeout(() => process.exit(1), 15000).unref();
+    };
+    process.once("SIGTERM", () => shutdown("SIGTERM"));
+    process.once("SIGINT", () => shutdown("SIGINT"));
+    return server;
+}
+
+if (require.main === module) startServer();
+module.exports = { app, startServer, pool };
