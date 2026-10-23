@@ -1,0 +1,18 @@
+Backend login correction validation — 1 October 2026
+
+PASS: npm run check (server.js and catalog-pricing.js)
+PASS: npm test — 3 integration tests, 0 failures
+Covered: production .env loading from server directory, hosting environment precedence,
+allowed/disallowed CORS origins, successful OPTIONS preflight with database unavailable,
+valid/invalid passwords, missing admin configuration, valid/expired/tampered/malformed
+tokens, invalid JSON, login rate limiting, process health and database readiness.
+
+PASS: 6 browser login checks across admin-orders.html and admin-blog.html.
+Both screens identify wrong credentials and connection failures, and successfully log in
+using the running backend with cross-origin requests. Password whitespace is preserved.
+No browser JavaScript exceptions were recorded.
+PASS: frontend admin JavaScript syntax checks.
+
+Production hosting, real PostgreSQL table initialization, SMTP and real orders were not
+exercised. The package has not been deployed to the live server.
+See LOGIN-SETUP.md for deployment instructions and test/auth.test.cjs for repeatable tests.

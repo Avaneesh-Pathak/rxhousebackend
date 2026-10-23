@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Runtime uploaded media - NEVER commit user uploads
+/images/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Logs / runtime files
+*.log
+*.pid
+coverage/
+
+# Local OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Keep package-lock.json tracked for reproducible production installs.
